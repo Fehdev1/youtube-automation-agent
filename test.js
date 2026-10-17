@@ -38,6 +38,7 @@ class SystemTest {
       { name: 'Research and Provenance Desk', test: () => this.testProvenanceDesk() },
       { name: 'DarkzSEO Discoverability Preflight', test: () => this.testDiscoverabilityPreflight() },
       { name: 'Open Issue Regressions', test: () => this.testOpenIssueRegressions() },
+      { name: 'OAuth Login Hardening', test: () => this.testOAuthSecurityHardening() },
       { name: 'Reported Issue Fixes (#63, #65, #66)', test: () => this.testReportedIssueFixes() },
       { name: 'Resumable Generation Checkpoints', test: () => this.testResumableGenerationCheckpoints() },
       { name: 'API Validation and Security', test: () => this.testAPIValidationAndSecurity() },
@@ -3775,6 +3776,139 @@ class SystemTest {
     }
     const noService = new DailyAutomation({}, {}, {});
     await noService.refreshGrowthExperiments();
+  }
+
+  async testOAuthSecurityHardening() {
+    const http = require('http');
+    const net = require('net');
+    const os = require('os');
+    const fsp = require('fs/promises');
+    const { google } = require('googleapis');
+    const { ModernAuth } = require('./modern-auth');
+    const { escapeHtml } = require('./utils/html-escape');
+    const { createOAuthSession, secretsMatch, isLoopbackHostHeader } = require('./utils/oauth-security');
+
+    if (escapeHtml('<script>alert("x")</script>&\'') !== '&lt;script&gt;alert(&quot;x&quot;)&lt;/script&gt;&amp;&#039;') {
+      throw new Error('escapeHtml did not escape HTML-significant characters');
+    }
+    if (escapeHtml(null) !== '') throw new Error('escapeHtml must turn null into an empty string');
+
+    if (!secretsMatch('abc', 'abc') || secretsMatch('abc', 'abd') || secretsMatch('abc', 'abcd') || secretsMatch('abc', undefined)) {
+      throw new Error('secretsMatch must only accept an identical string');
+    }
+    if (!isLoopbackHostHeader('127.0.0.1:8123', 8123) || !isLoopbackHostHeader('localhost:8123', 8123)
+      || isLoopbackHostHeader('evil.example:8123', 8123) || isLoopbackHostHeader('127.0.0.1:9999', 8123)
+      || isLoopbackHostHeader(undefined, 8123)) {
+      throw new Error('isLoopbackHostHeader accepted a host that is not this machine on the expected port');
+    }
+
+    const freePort = await new Promise((resolve, reject) => {
+      const probe = net.createServer();
+      probe.once('error', reject);
+      probe.listen(0, '127.0.0.1', () => {
+        const { port } = probe.address();
+        probe.close(() => resolve(port));
+      });
+    });
+    const redirect = { uri: `http://127.0.0.1:${freePort}/`, hostname: '127.0.0.1', port: freePort, pathname: '/' };
+
+    // The real OAuth client must accept the state and PKCE parameters we send.
+    const realClient = new google.auth.OAuth2('client-id', 'client-secret', redirect.uri);
+    const session = await createOAuthSession(realClient);
+    const authUrl = new URL(realClient.generateAuthUrl({
+      scope: ['https://www.googleapis.com/auth/youtube'],
+      state: session.state,
+      code_challenge: session.codeChallenge,
+      code_challenge_method: 'S256'
+    }));
+    if (session.state.length !== 64 || authUrl.searchParams.get('state') !== session.state
+      || authUrl.searchParams.get('code_challenge_method') !== 'S256' || !authUrl.searchParams.get('code_challenge')) {
+      throw new Error('The authorization URL must carry a random state and an S256 PKCE challenge');
+    }
+
+    const get = (pathAndQuery, headers = {}) => new Promise((resolve, reject) => {
+      http.get({ host: '127.0.0.1', port: freePort, path: pathAndQuery, headers, agent: false }, response => {
+        let body = '';
+        response.on('data', chunk => { body += chunk; });
+        response.on('end', () => resolve({ status: response.statusCode, headers: response.headers, body }));
+      }).on('error', reject);
+    });
+
+    const directory = await fsp.mkdtemp(path.join(os.tmpdir(), 'oauth-hardening-'));
+    const goodState = 'a'.repeat(64);
+    let activeAuth = null;
+    const build = async () => {
+      const auth = new ModernAuth();
+      activeAuth = auth;
+      auth.tokensPath = path.join(directory, 'tokens.json');
+      auth.session = { state: goodState, codeVerifier: 'verifier-value', codeChallenge: 'challenge' };
+      const calls = { getToken: [], resolved: 0, rejected: [] };
+      auth.resolveAuth = () => { calls.resolved++; };
+      auth.rejectAuth = error => { calls.rejected.push(error); };
+      const client = {
+        getToken: async argument => {
+          calls.getToken.push(argument);
+          return { tokens: { access_token: 'test-token' } };
+        }
+      };
+      await auth.startTempServer(redirect, client);
+      return { auth, calls };
+    };
+
+    try {
+      let { auth, calls } = await build();
+
+      // 1. Reflected input is never echoed, and a callback without our state is refused.
+      const injected = encodeURIComponent('<script>alert(1)</script>');
+      let response = await get(`/?error=${injected}`);
+      if (response.status !== 400 || response.body.includes('<script>')) {
+        throw new Error('A callback without a state must be refused and must not reflect its input');
+      }
+      if (response.headers['referrer-policy'] !== 'no-referrer' || response.headers['cache-control'] !== 'no-store') {
+        throw new Error('OAuth callback pages must send Referrer-Policy and Cache-Control headers');
+      }
+
+      // 2. A code delivered with the wrong state never reaches the token exchange.
+      response = await get(`/?code=attacker-code&state=${'b'.repeat(64)}`);
+      if (response.status !== 400 || calls.getToken.length) {
+        throw new Error('A callback with the wrong state reached the token exchange');
+      }
+
+      // 3. A request whose Host is not this machine (DNS rebinding) is refused.
+      response = await get(`/?code=attacker-code&state=${goodState}`, { Host: 'evil.example' });
+      if (response.status !== 400 || calls.getToken.length) {
+        throw new Error('A request with a non-loopback Host header was not refused');
+      }
+
+      // 4. None of the above may end or fail the legitimate login.
+      if (calls.rejected.length || calls.resolved) {
+        throw new Error('Unexpected requests must not end the pending login');
+      }
+
+      // 5. The real callback completes, sends the PKCE verifier, and stores the tokens.
+      response = await get(`/?code=real-code&state=${goodState}`);
+      if (response.status !== 200 || calls.getToken.length !== 1
+        || calls.getToken[0].code !== 'real-code' || calls.getToken[0].codeVerifier !== 'verifier-value') {
+        throw new Error('The valid callback did not exchange the code with the PKCE verifier');
+      }
+      if (!calls.resolved) throw new Error('The valid callback did not resolve the login');
+      const saved = JSON.parse(await fsp.readFile(auth.tokensPath, 'utf8'));
+      if (saved.youtube.access_token !== 'test-token') throw new Error('The tokens were not saved');
+      auth.cleanup();
+
+      // 6. A provider error with a valid state is escaped and ends the login.
+      ({ auth, calls } = await build());
+      response = await get(`/?error=${encodeURIComponent('<b>boom</b>')}&state=${goodState}`);
+      if (response.status !== 400 || response.body.includes('<b>') || !response.body.includes('&lt;b&gt;boom')) {
+        throw new Error('A provider error was not HTML-escaped');
+      }
+      if (calls.rejected.length !== 1) throw new Error('A provider error must reject the login');
+      auth.cleanup();
+    } finally {
+      // Always release the port, even when an assertion above failed.
+      if (activeAuth) activeAuth.cleanup();
+      await fsp.rm(directory, { recursive: true, force: true }).catch(() => {});
+    }
   }
 }
 

@@ -3,31 +3,59 @@ const { google } = require('googleapis');
 const fs = require('fs');
 const path = require('path');
 const chalk = require('chalk');
+const { escapeHtml } = require('./utils/html-escape');
+const {
+  HTML_SECURITY_HEADERS,
+  createOAuthSession,
+  secretsMatch,
+  isLoopbackHostHeader
+} = require('./utils/oauth-security');
+
+const CALLBACK_PORT = 8080;
 
 class OAuthServer {
   constructor() {
     this.app = express();
+    this.app.disable('x-powered-by');
     this.server = null;
+    this.session = null;
     this.setupRoutes();
   }
 
   setupRoutes() {
+    // Reject DNS-rebinding requests and send safe headers on every page.
+    this.app.use((req, res, next) => {
+      if (!isLoopbackHostHeader(req.headers.host, CALLBACK_PORT)) {
+        return res.status(400).send('Bad request');
+      }
+      res.set(HTML_SECURITY_HEADERS);
+      return next();
+    });
+
     this.app.get('/auth/callback', async (req, res) => {
-      const { code, error } = req.query;
-      
+      const { code, error, state } = req.query;
+
+      // Only the login this process started can finish it; the state is single-use.
+      const session = this.session;
+      if (!session || !secretsMatch(session.state, typeof state === 'string' ? state : '')) {
+        res.status(400).send('<h1>❌ Unexpected request</h1><p>This authorization response does not belong to the current login. Start the login again from the terminal.</p>');
+        return;
+      }
+      this.session = null;
+
       if (error) {
-        res.send(`<h1>❌ Authentication Error</h1><p>${error}</p>`);
+        res.status(400).send(`<h1>❌ Authentication Error</h1><p>${escapeHtml(error)}</p>`);
         return;
       }
 
-      if (!code) {
-        res.send(`<h1>❌ No Authorization Code</h1><p>No authorization code received</p>`);
+      if (typeof code !== 'string' || !code) {
+        res.status(400).send('<h1>❌ No Authorization Code</h1><p>No authorization code received</p>');
         return;
       }
 
       try {
         // Exchange code for tokens
-        await this.exchangeCodeForTokens(code);
+        await this.exchangeCodeForTokens(code, session.codeVerifier);
         
         res.send(`
           <h1>🎉 Authentication Successful!</h1>
@@ -47,9 +75,10 @@ class OAuthServer {
           this.startMainApplication();
         }, 2000);
         
-      } catch (error) {
-        console.error(chalk.red('Token exchange failed:'), error);
-        res.send(`<h1>❌ Token Exchange Failed</h1><p>${error.message}</p>`);
+      } catch (exchangeError) {
+        // Details stay in the terminal; the browser only gets a generic message.
+        console.error(chalk.red('Token exchange failed:'), exchangeError);
+        res.status(500).send('<h1>❌ Token Exchange Failed</h1><p>See the terminal for details.</p>');
       }
     });
 
@@ -65,7 +94,7 @@ class OAuthServer {
     });
   }
 
-  async exchangeCodeForTokens(code) {
+  async exchangeCodeForTokens(code, codeVerifier) {
     const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
     const tokensPath = path.join(__dirname, 'config', 'tokens.json');
     
@@ -77,7 +106,7 @@ class OAuthServer {
       credentials.youtube.redirect_uris[0]
     );
 
-    const { tokens } = await oauth2Client.getToken(code);
+    const { tokens } = await oauth2Client.getToken({ code, codeVerifier });
     
     // Save tokens
     const tokenData = {
@@ -105,13 +134,17 @@ class OAuthServer {
   }
 
   start() {
-    this.server = this.app.listen(8080, '127.0.0.1', () => {
-      console.log(chalk.cyan('\n🔐 OAuth callback server started on http://localhost:8080'));
-      this.generateAuthUrl();
+    this.server = this.app.listen(CALLBACK_PORT, '127.0.0.1', () => {
+      console.log(chalk.cyan(`\n🔐 OAuth callback server started on http://localhost:${CALLBACK_PORT}`));
+      this.generateAuthUrl().catch(error => {
+        console.error(chalk.red('Could not start the OAuth login:'), error.message);
+        this.server.close();
+        process.exitCode = 1;
+      });
     });
   }
 
-  generateAuthUrl() {
+  async generateAuthUrl() {
     const credentialsPath = path.join(__dirname, 'config', 'credentials.json');
     const credentials = JSON.parse(fs.readFileSync(credentialsPath));
     
@@ -120,6 +153,9 @@ class OAuthServer {
       credentials.youtube.client_secret,
       credentials.youtube.redirect_uris[0]
     );
+
+    // One-time state + PKCE pair for this login.
+    this.session = await createOAuthSession(oauth2Client);
 
     const scopes = [
       'https://www.googleapis.com/auth/youtube.upload',
@@ -132,7 +168,10 @@ class OAuthServer {
     const authUrl = oauth2Client.generateAuthUrl({
       access_type: 'offline',
       scope: scopes,
-      prompt: 'consent'
+      prompt: 'consent',
+      state: this.session.state,
+      code_challenge: this.session.codeChallenge,
+      code_challenge_method: 'S256'
     });
 
     console.log(chalk.cyan.bold('\n🎬 YouTube Automation Agent - OAuth Setup'));

@@ -4,12 +4,25 @@ const path = require('path');
 const chalk = require('chalk');
 const http = require('http');
 const { URL } = require('url');
+const { escapeHtml } = require('./utils/html-escape');
+const {
+  HTML_SECURITY_HEADERS,
+  createOAuthSession,
+  secretsMatch,
+  isLoopbackHostHeader
+} = require('./utils/oauth-security');
+
+function sendHtml(res, status, body) {
+  res.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', ...HTML_SECURITY_HEADERS });
+  res.end(body);
+}
 
 class ModernAuth {
   constructor() {
     this.credentialsPath = path.join(__dirname, 'config', 'credentials.json');
     this.tokensPath = path.join(__dirname, 'config', 'tokens.json');
     this.server = null;
+    this.session = null;
   }
 
   async authenticate() {
@@ -45,6 +58,9 @@ class ModernAuth {
         }, 300000);
       });
 
+      // One-time state + PKCE pair for this login. It must exist before the server starts.
+      this.session = await createOAuthSession(oauth2Client);
+
       // Start a temporary local server at the exact redirect URI used in the OAuth request.
       await this.startTempServer(redirect, oauth2Client);
       
@@ -52,7 +68,10 @@ class ModernAuth {
       const authUrl = oauth2Client.generateAuthUrl({
         access_type: 'offline',
         scope: scopes,
-        prompt: 'consent'
+        prompt: 'consent',
+        state: this.session.state,
+        code_challenge: this.session.codeChallenge,
+        code_challenge_method: 'S256'
       });
 
       console.log(chalk.cyan('🔗 Please visit this URL to authorize:'));
@@ -111,60 +130,21 @@ class ModernAuth {
 
   async startTempServer(redirect, oauth2Client) {
     this.server = http.createServer(async (req, res) => {
-      const url = new URL(req.url, redirect.uri);
-      
-      if (url.pathname === redirect.pathname) {
-        const code = url.searchParams.get('code');
-        const error = url.searchParams.get('error');
-        
-        if (error) {
-          res.writeHead(400, { 'Content-Type': 'text/html' });
-          res.end(`
-            <h1>❌ Authorization Error</h1>
-            <p>${error}</p>
-            <p>You can close this window.</p>
-          `);
-          this.rejectAuth(new Error(`Authorization error: ${error}`));
-          return;
-        }
-        
-        if (code) {
-          try {
-            const { tokens } = await oauth2Client.getToken(code);
-            
-            // Save tokens
-            const tokenData = { youtube: tokens };
-            fs.writeFileSync(this.tokensPath, JSON.stringify(tokenData, null, 2), { mode: 0o600 });
-            fs.chmodSync(this.tokensPath, 0o600);
-            
-            res.writeHead(200, { 'Content-Type': 'text/html' });
-            res.end(`
-              <html>
-                <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
-                  <h1 style="color: #4CAF50;">🎉 Authentication Successful!</h1>
-                  <p>Your YouTube Automation Agent has been authorized!</p>
-                  <p><strong>"Ethereal Dreamscript"</strong> is ready for automation.</p>
-                  <p>You can close this window and return to the terminal.</p>
-                </body>
-              </html>
-            `);
-            
-            console.log(chalk.green('\n✅ Authentication successful!'));
-            this.cleanup();
-            this.resolveAuth(tokens);
-            
-          } catch (tokenError) {
-            res.writeHead(500, { 'Content-Type': 'text/html' });
-            res.end(`
-              <h1>❌ Token Exchange Failed</h1>
-              <p>${tokenError.message}</p>
-            `);
-            this.rejectAuth(tokenError);
-          }
-        }
-      } else {
-        res.writeHead(200, { 'Content-Type': 'text/html' });
-        res.end(`
+      if (!isLoopbackHostHeader(req.headers.host, redirect.port)) {
+        sendHtml(res, 400, '<h1>Bad request</h1>');
+        return;
+      }
+
+      let url;
+      try {
+        url = new URL(req.url, redirect.uri);
+      } catch (_error) {
+        sendHtml(res, 400, '<h1>Bad request</h1>');
+        return;
+      }
+
+      if (url.pathname !== redirect.pathname) {
+        sendHtml(res, 200, `
           <html>
             <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
               <h1>🎬 YouTube Automation Agent</h1>
@@ -173,9 +153,65 @@ class ModernAuth {
             </body>
           </html>
         `);
+        return;
+      }
+
+      // Only the login this process started can finish it. Anything else is ignored
+      // (not treated as a failed login), so a stray request cannot cancel or hijack it.
+      const session = this.session;
+      if (!session || !secretsMatch(session.state, url.searchParams.get('state'))) {
+        sendHtml(res, 400, '<h1>❌ Unexpected request</h1><p>This authorization response does not belong to the current login. Start the login again from the terminal.</p>');
+        return;
+      }
+      this.session = null; // the state is single-use
+
+      const code = url.searchParams.get('code');
+      const error = url.searchParams.get('error');
+
+      if (error) {
+        sendHtml(res, 400, `
+          <h1>❌ Authorization Error</h1>
+          <p>${escapeHtml(error)}</p>
+          <p>You can close this window.</p>
+        `);
+        this.rejectAuth(new Error(`Authorization error: ${String(error).slice(0, 200)}`));
+        return;
+      }
+
+      if (!code) {
+        sendHtml(res, 400, '<h1>❌ No Authorization Code</h1><p>No authorization code received.</p>');
+        this.rejectAuth(new Error('Authorization response did not include a code'));
+        return;
+      }
+
+      try {
+        const { tokens } = await oauth2Client.getToken({ code, codeVerifier: session.codeVerifier });
+
+        // Save tokens
+        const tokenData = { youtube: tokens };
+        fs.writeFileSync(this.tokensPath, JSON.stringify(tokenData, null, 2), { mode: 0o600 });
+        fs.chmodSync(this.tokensPath, 0o600);
+
+        sendHtml(res, 200, `
+          <html>
+            <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+              <h1 style="color: #4CAF50;">🎉 Authentication Successful!</h1>
+              <p>Your YouTube Automation Agent has been authorized!</p>
+              <p>You can close this window and return to the terminal.</p>
+            </body>
+          </html>
+        `);
+
+        console.log(chalk.green('\n✅ Authentication successful!'));
+        this.cleanup();
+        this.resolveAuth(tokens);
+      } catch (tokenError) {
+        // Details stay in the terminal; the browser only gets a generic message.
+        sendHtml(res, 500, '<h1>❌ Token Exchange Failed</h1><p>See the terminal for details.</p>');
+        this.rejectAuth(tokenError);
       }
     });
-    
+
     await new Promise((resolve, reject) => {
       this.server.once('error', reject);
       this.server.listen(redirect.port, redirect.hostname, resolve);
@@ -240,7 +276,7 @@ async function runAuth() {
     
     if (success) {
       console.log(chalk.green.bold('\n🎉 Authentication Complete!'));
-      console.log(chalk.cyan('Your "Ethereal Dreamscript" YouTube automation is ready!'));
+      console.log(chalk.cyan('Your YouTube automation is ready!'));
       console.log(chalk.yellow('\n📋 Next Steps:'));
       console.log(chalk.white('1. Run: npm start'));
       console.log(chalk.white('2. Visit: http://localhost:3456'));
