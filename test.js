@@ -67,7 +67,8 @@ class SystemTest {
       { name: 'Reply Approval and Posting', test: () => this.testReplyApprovalAndPosting() },
       { name: 'Engagement AI Provider Wiring', test: () => this.testEngagementAIProviderWiring() },
       { name: 'Engagement Sync Schedule', test: () => this.testEngagementSyncSchedule() },
-      { name: 'Growth Experiment Refresh Schedule', test: () => this.testGrowthExperimentRefreshSchedule() }
+      { name: 'Growth Experiment Refresh Schedule', test: () => this.testGrowthExperimentRefreshSchedule() },
+      { name: 'Content Language and Azure Narration', test: () => this.testContentLanguageAndAzureNarration() }
     ];
 
     let passed = 0;
@@ -3754,6 +3755,77 @@ class SystemTest {
     }
     const noService = new DailyAutomation({}, fakeDb, { generateContent: async () => {} });
     await noService.collectAudienceEngagement(); // must be a silent no-op, not a crash
+  }
+
+  async testContentLanguageAndAzureNarration() {
+    const fs = require('fs').promises;
+    const os = require('os');
+    const axios = require('axios');
+    const { AITextService } = require('./utils/ai-text-service');
+    const { AIVideoGenerator } = require('./utils/ai-video-generator');
+    const originalLanguage = process.env.CONTENT_LANGUAGE;
+    const originalVoice = process.env.AZURE_SPEECH_VOICE;
+    const originalPost = axios.post;
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-language-'));
+
+    try {
+      // Every prompt asks for audience-facing text in CONTENT_LANGUAGE.
+      process.env.CONTENT_LANGUAGE = 'pt-BR';
+      const text = new AITextService({ gemini: { apiKey: 'test-key' } });
+      let sentPrompt = '';
+      text.gemini.models.generateContent = async request => {
+        sentPrompt = request.contents;
+        return { text: 'ok', candidates: [{ finishReason: 'STOP' }] };
+      };
+      await text.generateText('Write a title.');
+      if (!sentPrompt.includes('pt-BR') || !sentPrompt.includes('Write a title.')) {
+        throw new Error('CONTENT_LANGUAGE was not added to the AI prompt');
+      }
+
+      delete process.env.CONTENT_LANGUAGE;
+      await text.generateText('Write a title.');
+      if (sentPrompt !== 'Write a title.') {
+        throw new Error('Prompts must be unchanged when CONTENT_LANGUAGE is not set');
+      }
+
+      // Azure Speech narrates long scripts in chunks and wins over OpenAI and Gemini.
+      process.env.AZURE_SPEECH_VOICE = 'pt-BR-AntonioNeural';
+      const requests = [];
+      axios.post = async (url, body, config) => {
+        requests.push({ url, body, config });
+        return { data: Buffer.from(`chunk${requests.length}`) };
+      };
+      const generator = new AIVideoGenerator({
+        azure: { speechKey: 'test-key', speechRegion: 'brazilsouth' },
+        openai: { apiKey: 'test-key' },
+        gemini: { apiKey: 'test-key' }
+      });
+      generator.isUsableAudioFile = async () => true;
+      const outputPath = path.join(directory, 'narration.mp3');
+      const paragraph = 'Roma & Cartago <guerra>. '.repeat(100);
+      await generator.generateTTSAudio(`${paragraph}\n\n${paragraph}`, outputPath);
+
+      const first = requests[0];
+      if (requests.length !== 2 || !first.url.startsWith('https://brazilsouth.tts.speech.microsoft.com/')) {
+        throw new Error(`Azure Speech was not called once per chunk (calls: ${requests.length})`);
+      }
+      if (first.config.headers['Ocp-Apim-Subscription-Key'] !== 'test-key' ||
+        !first.body.includes("name='pt-BR-AntonioNeural'") || !first.body.includes("xml:lang='pt-BR'") ||
+        !first.body.includes('Roma &amp; Cartago &lt;guerra&gt;.')) {
+        throw new Error('Azure SSML request is missing the key, voice, language or XML escaping');
+      }
+      if (generator.lastNarrationResult.provider !== 'azure' ||
+        await fs.readFile(outputPath, 'utf8') !== 'chunk1chunk2') {
+        throw new Error('Azure narration chunks were not saved as one audio file');
+      }
+    } finally {
+      axios.post = originalPost;
+      if (originalLanguage === undefined) delete process.env.CONTENT_LANGUAGE;
+      else process.env.CONTENT_LANGUAGE = originalLanguage;
+      if (originalVoice === undefined) delete process.env.AZURE_SPEECH_VOICE;
+      else process.env.AZURE_SPEECH_VOICE = originalVoice;
+      await fs.rm(directory, { recursive: true, force: true });
+    }
   }
 
   async testGrowthExperimentRefreshSchedule() {

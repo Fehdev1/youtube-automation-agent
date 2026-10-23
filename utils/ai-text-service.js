@@ -48,6 +48,13 @@ const PROVIDERS = {
   },
 };
 
+// Asks for audience-facing text in the channel language (a BCP 47 code such as pt-BR).
+function withContentLanguage(prompt) {
+  const language = process.env.CONTENT_LANGUAGE;
+  if (!language || typeof prompt !== 'string') return prompt;
+  return `${prompt}\n\nWrite every piece of audience-facing text (titles, scripts, narration, descriptions, tags, captions and replies) in the language with BCP 47 code "${language}". Keep JSON keys, field names and the requested format exactly as specified.`;
+}
+
 class AITextService {
   constructor(credentials = {}) {
     this.logger = new Logger('AITextService');
@@ -103,6 +110,7 @@ class AITextService {
   }
 
   async generateText(prompt, options = {}) {
+    prompt = withContentLanguage(prompt);
     const model = options.model || this.model;
     const maxTokens = options.maxTokens || 2048;
     const temperature = options.temperature ?? 0.7;

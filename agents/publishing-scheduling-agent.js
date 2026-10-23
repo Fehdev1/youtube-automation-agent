@@ -399,8 +399,8 @@ class PublishingSchedulingAgent {
         requestBody: {
           snippet: {
             videoId: videoId,
-            language: 'en',
-            name: 'English Captions',
+            language: process.env.CONTENT_LANGUAGE || 'en',
+            name: `Captions (${process.env.CONTENT_LANGUAGE || 'en'})`,
             isDraft: false
           }
         },

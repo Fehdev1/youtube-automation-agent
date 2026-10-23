@@ -139,7 +139,9 @@ Avoid fabricated statistics, unsupported claims, and fake urgency. List every ex
 
     try {
       const response = await this.aiTextService.generateText(prompt, {
-        maxTokens: 1800,
+        // An 8-12 minute script is ~1,500 spoken words plus JSON and claims;
+        // 1,800 tokens cut it to about four minutes, worse in non-English languages.
+        maxTokens: 6000,
         temperature: 0.7
       });
       const parsed = this.parseAIJsonResponse(response);

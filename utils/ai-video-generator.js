@@ -125,6 +125,10 @@ class AIVideoGenerator {
         provider = 'elevenlabs';
         model = this.elevenLabsModel;
         generatedPath = await this.generateElevenLabsTTS(text, outputPath);
+      } else if (this.azureSpeechKey && this.azureSpeechRegion) {
+        provider = 'azure';
+        model = this.azureSpeechVoice();
+        generatedPath = await this.generateAzureTTS(text, outputPath);
       } else if (this.openai) {
         provider = 'openai';
         model = 'gpt-4o-mini-tts';
@@ -196,6 +200,47 @@ class AIVideoGenerator {
       });
       writer.on('error', reject);
     });
+  }
+
+  azureSpeechVoice() {
+    return process.env.AZURE_SPEECH_VOICE || 'en-US-JennyNeural';
+  }
+
+  // Azure Speech REST caps one request at 10 minutes of audio, so long scripts
+  // are sent in chunks. MP3 frames concatenate into one playable file.
+  async generateAzureTTS(text, outputPath) {
+    const voice = this.azureSpeechVoice();
+    const lang = voice.split('-').slice(0, 2).join('-');
+    const url = `https://${this.azureSpeechRegion}.tts.speech.microsoft.com/cognitiveservices/v1`;
+    const escapeXml = value => value.replace(/[<>&'"]/g, char => (
+      { '<': '&lt;', '>': '&gt;', '&': '&amp;', "'": '&apos;', '"': '&quot;' }[char]
+    ));
+
+    const chunks = [];
+    for (const piece of text.split(/(?<=[.!?])\s+|\n+/)) {
+      const last = chunks.length - 1;
+      if (last >= 0 && chunks[last].length + piece.length < 3000) chunks[last] += ` ${piece}`;
+      else if (piece.trim()) chunks.push(piece);
+    }
+
+    const audio = [];
+    for (const chunk of chunks) {
+      const ssml = `<speak version='1.0' xml:lang='${lang}'><voice name='${voice}'>${escapeXml(chunk.trim())}</voice></speak>`;
+      const response = await axios.post(url, ssml, {
+        headers: {
+          'Ocp-Apim-Subscription-Key': this.azureSpeechKey,
+          'Content-Type': 'application/ssml+xml',
+          'X-Microsoft-OutputFormat': 'audio-24khz-96kbitrate-mono-mp3',
+          'User-Agent': 'youtube-automation-agent'
+        },
+        responseType: 'arraybuffer'
+      });
+      audio.push(Buffer.from(response.data));
+    }
+
+    await fs.writeFile(outputPath, Buffer.concat(audio));
+    this.logger.info(`Azure Speech TTS generation complete (${chunks.length} request(s))`);
+    return outputPath;
   }
 
   async generateOpenAITTS(text, outputPath) {
