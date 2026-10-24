@@ -79,7 +79,8 @@ class SystemTest {
       { name: 'Editor Persistence', test: () => this.testEditorPersistence() },
       { name: 'Editor Media Library', test: () => this.testEditorLibrary() },
       { name: 'Editor Renderer Arguments', test: () => this.testEditorRenderer() },
-      { name: 'Editor Real Render', test: () => this.testEditorRenderReal() }
+      { name: 'Editor Real Render', test: () => this.testEditorRenderReal() },
+      { name: 'Editor CapCut Export', test: () => this.testEditorExport() }
     ];
 
     let passed = 0;
@@ -4230,6 +4231,54 @@ class SystemTest {
       }
       if (!progress.some(p => p.stage === 'segments') || progress.at(-1).percent !== 100) throw new Error('Progress was not reported');
       if (await fs.access(path.join(dir, 'tmp')).then(() => true, () => false)) throw new Error('Temporary files were left behind');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  async testEditorExport() {
+    const fs = require('fs').promises;
+    const os = require('os');
+    const { exportForCapCut } = require('./utils/editor-export');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-editor-export-'));
+    const file = name => path.join(dir, name);
+    try {
+      for (const name of ['narration.mp3', 'Lion Gate.jpg', 'Катастрофа.png', 'song.mp3']) await fs.writeFile(file(name), name);
+      const library = {
+        narration: { id: 'narration', kind: 'audio', name: 'narration.mp3', path: file('narration.mp3') },
+        assets: [
+          { id: 'lion', kind: 'image', name: 'Lion Gate.jpg', path: file('Lion Gate.jpg'), credit: '"Lion Gate" por Ana, CC BY 4.0' },
+          { id: 'map', kind: 'image', name: 'Катастрофа.png', path: file('Катастрофа.png'), credit: null },
+          { id: 'song', kind: 'audio', name: 'song.mp3', path: file('song.mp3'), credit: null }
+        ]
+      };
+      const project = {
+        narration: { assetId: 'narration', duration: 5 },
+        music: { assetId: 'song', start: 0, end: 5, volume: 0.3, duck: true },
+        blocks: [
+          { id: 'b1', assetId: 'lion', duration: 2, zoom: 'in', transition: 'cut' },
+          { id: 'b2', assetId: 'map', duration: 3, zoom: 'none', transition: 'fade' }
+        ]
+      };
+      const texts = { script: 'Roteiro', captions: '1\n00:00:00,000 --> 00:00:02,000\nOi.\n', title: 'Título X', description: 'Desc', tags: ['a', 'b'] };
+      const folder = await exportForCapCut({ project, library, texts, title: 'O Colapso: da Idade do Bronze?', exportRoot: path.join(dir, 'export') });
+
+      if (path.basename(folder) !== 'o-colapso-da-idade-do-bronze') throw new Error(`Folder name was ${path.basename(folder)}`);
+      const files = (await fs.readdir(folder)).sort();
+      for (const expected of ['01_narracao.mp3', '02_legenda.srt', '03_roteiro.txt', '04_youtube.txt', '05_ordem_e_tempos.txt', 'imagens', 'musica']) {
+        if (!files.includes(expected)) throw new Error(`Missing ${expected} in ${files.join(', ')}`);
+      }
+      const images = (await fs.readdir(path.join(folder, 'imagens'))).sort();
+      if (images.length !== 2 || !images[0].startsWith('001_') || !images[1].startsWith('002_')) throw new Error(`Images were ${images.join(', ')}`);
+      const order = (await fs.readFile(path.join(folder, '05_ordem_e_tempos.txt'), 'utf8')).trim().split('\n');
+      if (order.length !== 2 || !order[0].startsWith('001 · 00:00.0 → 00:02.0 · Lion Gate.jpg · zoom aproximar · corte') ||
+        !order[1].startsWith('002 · 00:02.0 → 00:05.0 · Катастрофа.png · sem zoom · esmaecer')) {
+        throw new Error(`Order file was:\n${order.join('\n')}`);
+      }
+      const youtube = await fs.readFile(path.join(folder, '04_youtube.txt'), 'utf8');
+      if (!youtube.includes('Título X') || !youtube.includes('a, b') || !youtube.includes('Lion Gate" por Ana')) throw new Error(`YouTube file was:\n${youtube}`);
+      await exportForCapCut({ project: { ...project, music: null, blocks: [project.blocks[0]] }, library, texts, title: 'O Colapso: da Idade do Bronze?', exportRoot: path.join(dir, 'export') });
+      if ((await fs.readdir(path.join(folder, 'imagens'))).length !== 1) throw new Error('Exporting again must replace the folder');
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
     }
