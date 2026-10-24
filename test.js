@@ -74,7 +74,8 @@ class SystemTest {
       { name: 'Growth Experiment Refresh Schedule', test: () => this.testGrowthExperimentRefreshSchedule() },
       { name: 'Content Language and Azure Narration', test: () => this.testContentLanguageAndAzureNarration() },
       { name: 'Wikimedia Commons Images', test: () => this.testWikimediaImages() },
-      { name: 'Spoken Script and Synced Captions', test: () => this.testSpokenScriptAndCaptions() }
+      { name: 'Spoken Script and Synced Captions', test: () => this.testSpokenScriptAndCaptions() },
+      { name: 'Editor Project Model', test: () => this.testEditorProject() }
     ];
 
     let passed = 0;
@@ -3983,6 +3984,59 @@ class SystemTest {
       words !== 'Um dois três quatro cinco seis sete oito nove dez. Onze doze.') {
       throw new Error(`Captions are not aligned to the narration:\n${srt}`);
     }
+  }
+
+  async testEditorProject() {
+    const { parseSRT, buildInitialProject, normalizeProject, blockTimes } = require('./utils/editor-project');
+    const assert = (condition, message) => { if (!condition) throw new Error(message); };
+    const rejects = (fn, label) => {
+      try { fn(); } catch (error) { assert(error.status === 400, `${label}: expected status 400, got ${error.status}`); return; }
+      throw new Error(`${label}: was accepted`);
+    };
+
+    const srt = parseSRT('1\n00:00:01,500 --> 00:00:03,000\nOlá mundo.\n\n2\n00:01:00,000 --> 00:01:02,250\nFim\n');
+    assert(srt.length === 2 && srt[0].start === 1.5 && srt[0].end === 3 && srt[0].text === 'Olá mundo.' && srt[1].end === 62.25,
+      `parseSRT read ${JSON.stringify(srt)}`);
+
+    const captions = [
+      { start: 0, end: 10, text: 'Primeira frase longa' }, { start: 10, end: 19.5, text: 'termina aqui.' },
+      { start: 19.5, end: 30, text: 'Outra parte' }, { start: 30, end: 41, text: 'acaba aqui!' },
+      { start: 41, end: 60, text: 'Final.' }
+    ];
+    const project = buildInitialProject({ narrationDuration: 60, captions, imageAssetIds: ['a', 'b', 'c'] });
+    const times = blockTimes(project);
+    assert(project.schema === 1 && project.resolution === '1920x1080' && project.fps === 30 && project.music === null &&
+      project.narration.assetId === 'narration' && project.narration.duration === 60, 'project header is wrong');
+    assert(times.map(t => t.end).join(',') === '19.5,41,60', `cuts should land on sentence ends: ${JSON.stringify(times)}`);
+    assert(project.blocks.map(b => b.zoom).join(',') === 'in,out,in', 'zoom should alternate in/out');
+    assert(project.blocks.map(b => b.transition).join(',') === 'cut,fade,fade', 'first block cuts, the rest fade');
+    assert(project.blocks.map(b => b.assetId).join(',') === 'a,b,c', 'images keep their order');
+
+    const even = buildInitialProject({ narrationDuration: 60, captions: [], imageAssetIds: ['a', 'b', 'c'] });
+    assert(even.blocks.map(b => b.duration).join(',') === '20,20,20', 'without captions the cuts are even');
+
+    const crowded = buildInitialProject({ narrationDuration: 3, captions: [], imageAssetIds: ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'] });
+    assert(crowded.blocks.length <= 3 && crowded.blocks.every(b => b.duration >= 1), 'no block may be shorter than 1 s');
+
+    const kinds = new Map([['a', 'image'], ['b', 'image'], ['c', 'video'], ['song', 'audio']]);
+    const base = () => JSON.parse(JSON.stringify(project));
+    const ctx = { narrationDuration: 60, kinds };
+    rejects(() => normalizeProject({ ...base(), blocks: [{ id: 'x', assetId: 'a', duration: 0.5, zoom: 'in', transition: 'cut' }, ...base().blocks] }, ctx), 'short block');
+    rejects(() => { const p = base(); p.blocks[0].assetId = 'nope'; return normalizeProject(p, ctx); }, 'unknown asset');
+    rejects(() => { const p = base(); p.blocks[0].assetId = 'song'; return normalizeProject(p, ctx); }, 'audio as block');
+    rejects(() => { const p = base(); p.blocks[0].zoom = 'spin'; return normalizeProject(p, ctx); }, 'bad zoom');
+    rejects(() => normalizeProject({ ...base(), music: { assetId: 'song', start: 0, end: 60, volume: 1.5, duck: true } }, ctx), 'loud music');
+    rejects(() => normalizeProject({ ...base(), music: { assetId: 'song', start: 10, end: 10, volume: 0.3, duck: true } }, ctx), 'empty music');
+    rejects(() => normalizeProject({ ...base(), music: { assetId: 'a', start: 0, end: 60, volume: 0.3, duck: true } }, ctx), 'image as music');
+
+    const fadeFirst = base();
+    fadeFirst.blocks[0].transition = 'fade';
+    assert(normalizeProject(fadeFirst, ctx).blocks[0].transition === 'cut', 'the first block always cuts');
+
+    const shortTotal = base();
+    shortTotal.blocks[2].duration -= 2;
+    const fixed = normalizeProject(shortTotal, ctx);
+    assert(Math.abs(fixed.blocks.reduce((sum, b) => sum + b.duration, 0) - 60) < 0.001, 'the last block stretches to close the total');
   }
 
   async testGrowthExperimentRefreshSchedule() {
