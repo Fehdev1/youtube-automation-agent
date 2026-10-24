@@ -81,7 +81,8 @@ class SystemTest {
       { name: 'Editor Renderer Arguments', test: () => this.testEditorRenderer() },
       { name: 'Editor Real Render', test: () => this.testEditorRenderReal() },
       { name: 'Editor CapCut Export', test: () => this.testEditorExport() },
-      { name: 'Editor Service', test: () => this.testEditorService() }
+      { name: 'Editor Service', test: () => this.testEditorService() },
+      { name: 'Editor API Routes', test: () => this.testEditorRoutes() }
     ];
 
     let passed = 0;
@@ -3700,7 +3701,7 @@ class SystemTest {
       const summary = await service.getSummary();
       if (summary.postedToday < 1) throw new Error('getSummary missed postedToday');
       if (summary.postingEnabled !== true) throw new Error('getSummary posting flag is wrong');
-      if (!summary.evidencePolicy.includes('operator approval')) throw new Error('evidencePolicy text missing');
+      if (!summary.evidencePolicy.includes('depois da sua aprovação')) throw new Error('evidencePolicy text missing');
     } finally {
       await db.executeQuery('DELETE FROM audience_comments WHERE video_id = ?', [videoId]);
       await db.executeQuery('DELETE FROM reply_drafts WHERE video_id = ?', [videoId]);
@@ -4394,6 +4395,61 @@ class SystemTest {
       assert((await service.outputFolder('p1', 'export')) === exported.path, 'the export folder must be remembered');
     } finally {
       await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  }
+
+  async testEditorRoutes() {
+    const { YouTubeAutomationAgent } = require('./index');
+    const { EditorError } = require('./utils/editor-project');
+    const calls = [];
+    const agent = new YouTubeAutomationAgent();
+    agent.isInitialized = true;
+    agent.editor = {
+      listProductions: async () => [{ id: 'p1', title: 'Vídeo' }],
+      getEditor: async id => { if (id !== 'p1') throw new EditorError('Vídeo não encontrado.', 404); return { version: 1 }; },
+      saveProject: async (id, body) => { if (body.version === 1) throw Object.assign(new Error('conflito'), { status: 409 }); return { version: body.version + 1 }; },
+      addUpload: async (id, name, buffer) => {
+        if (!name.endsWith('.jpg')) throw new EditorError('Tipo de arquivo não aceito.');
+        calls.push({ name, size: buffer.length });
+        return { id: 'up_x', name };
+      },
+      assetPath: async (id, assetId) => { if (assetId === 'nope') throw new EditorError('Arquivo não encontrado.', 404); return __filename; },
+      startRender: async () => ({ status: 'running' }),
+      getRenderState: async () => ({ status: 'running', percent: 40 }),
+      exportProject: async () => ({ path: 'C:\\export\\video' }),
+      outputFolder: async () => null
+    };
+    agent.setupAPI();
+    const server = await new Promise(resolve => { const running = agent.app.listen(0, () => resolve(running)); });
+    const base = `http://127.0.0.1:${server.address().port}/api/editor`;
+    const call = (url, options = {}) => fetch(`${base}${url}`, options);
+    try {
+      const list = await call('/productions');
+      if (list.status !== 200 || (await list.json()).result[0].id !== 'p1') throw new Error('GET /productions failed');
+      if ((await call('/missing')).status !== 404) throw new Error('Unknown production must be 404');
+      const stale = await call('/p1', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ version: 1, project: {} }) });
+      if (stale.status !== 409 || !(await stale.json()).error) throw new Error('A stale save must be 409 with a message');
+      if ((await call('/p1/assets/nope')).status !== 404) throw new Error('An unknown asset must be 404');
+      const file = await call('/p1/assets/real', { headers: { Range: 'bytes=0-9' } });
+      if (file.status !== 206) throw new Error(`Assets must honor Range requests (got ${file.status})`);
+      const bad = await call('/p1/uploads', { method: 'POST', headers: { 'x-file-name': 'virus.exe', 'Content-Type': 'application/octet-stream' }, body: 'x' });
+      if (bad.status !== 400) throw new Error('A rejected upload must be 400');
+      const good = await call('/p1/uploads', {
+        method: 'POST',
+        headers: { 'x-file-name': encodeURIComponent('Катастрофа ação.jpg'), 'Content-Type': 'image/jpeg' },
+        body: Buffer.alloc(2048)
+      });
+      if (good.status !== 200 || calls[0]?.name !== 'Катастрофа ação.jpg' || calls[0].size !== 2048) {
+        throw new Error(`Upload names must be URI-decoded and the body kept intact: ${JSON.stringify(calls)}`);
+      }
+      const render = await call('/p1/render', { method: 'POST' });
+      if (render.status !== 200 || (await render.json()).result.status !== 'running') throw new Error('POST /render failed');
+      if ((await (await call('/p1/render')).json()).result.percent !== 40) throw new Error('GET /render failed');
+      if ((await (await call('/p1/export', { method: 'POST' })).json()).result.path !== 'C:\\export\\video') throw new Error('POST /export failed');
+      const open = await call('/p1/open-folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ target: 'render' }) });
+      if (open.status !== 404) throw new Error('Opening a folder that does not exist must be 404');
+    } finally {
+      await new Promise(resolve => server.close(resolve));
     }
   }
 

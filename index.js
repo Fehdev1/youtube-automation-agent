@@ -23,6 +23,7 @@ const { GenerationRecoveryService, GENERATION_STAGES } = require('./utils/genera
 const { ProvenanceService } = require('./utils/provenance-service');
 const { SceneRepairService } = require('./utils/scene-repair-service');
 const { ShortsRepurposingService } = require('./utils/shorts-repurposing-service');
+const { EditorService } = require('./utils/editor-service');
 const { AudienceEngagementService } = require('./utils/audience-engagement-service');
 const { GrowthExperimentService } = require('./utils/growth-experiment-service');
 const { AITextService } = require('./utils/ai-text-service');
@@ -52,6 +53,7 @@ class YouTubeAutomationAgent {
     this.provenance = null;
     this.scenes = null;
     this.shorts = null;
+    this.editor = null;
     this.engagement = null;
     this.experiments = null;
     this.discoverability = null;
@@ -113,6 +115,8 @@ class YouTubeAutomationAgent {
         { logger: this.logger }
       );
       this.shorts = new ShortsRepurposingService(this.db, this.agents.publishing, { logger: this.logger });
+      this.editor = new EditorService(this.db, { logger: this.logger });
+      await this.editor.markInterruptedRenders();
       this.engagement = new AudienceEngagementService(
         this.db,
         this.credentials,
@@ -376,6 +380,43 @@ class YouTubeAutomationAgent {
       status
     };
   }
+  // Media editor (dashboard tab "Editor de mídia"): library, timeline project, MP4 render and CapCut export.
+  setupEditorAPI(protect) {
+    const route = handler => async (req, res) => {
+      try {
+        if (!this.editor) return res.status(503).json({ success: false, error: 'O editor exige a configuração concluída.' });
+        return await handler(req, res);
+      } catch (error) {
+        return res.status(error.status || 500).json({ success: false, error: error.message });
+      }
+    };
+    const id = req => req.params.productionId;
+
+    this.app.get('/api/editor/productions', route(async (_req, res) => res.json({ success: true, result: await this.editor.listProductions() })));
+    this.app.get('/api/editor/:productionId', route(async (req, res) => res.json({ success: true, result: await this.editor.getEditor(id(req)) })));
+    this.app.put('/api/editor/:productionId', protect, route(async (req, res) =>
+      res.json({ success: true, result: await this.editor.saveProject(id(req), { version: req.body?.version, project: req.body?.project }) })));
+    // File names travel URI-encoded: HTTP headers cannot carry accents or Cyrillic.
+    this.app.post('/api/editor/:productionId/uploads', protect, express.raw({ type: () => true, limit: '200mb' }), route(async (req, res) => {
+      const name = decodeURIComponent(req.get('x-file-name') || '');
+      return res.json({ success: true, result: await this.editor.addUpload(id(req), name, req.body) });
+    }));
+    this.app.get('/api/editor/:productionId/assets/:assetId', route(async (req, res) => {
+      const file = await this.editor.assetPath(id(req), req.params.assetId);
+      return res.sendFile(path.resolve(file));
+    }));
+    this.app.post('/api/editor/:productionId/render', protect, route(async (req, res) => res.json({ success: true, result: await this.editor.startRender(id(req)) })));
+    this.app.get('/api/editor/:productionId/render', route(async (req, res) => res.json({ success: true, result: await this.editor.getRenderState(id(req)) })));
+    this.app.post('/api/editor/:productionId/export', protect, route(async (req, res) => res.json({ success: true, result: await this.editor.exportProject(id(req)) })));
+    this.app.post('/api/editor/:productionId/open-folder', protect, route(async (req, res) => {
+      const folder = await this.editor.outputFolder(id(req), req.body?.target === 'export' ? 'export' : 'render');
+      if (!folder) return res.status(404).json({ success: false, error: 'Ainda não há uma pasta para abrir.' });
+      if (process.platform !== 'win32') return res.status(501).json({ success: false, error: `Abra a pasta manualmente: ${folder}` });
+      require('child_process').execFile('explorer.exe', [folder], () => {});
+      return res.json({ success: true, result: { path: folder } });
+    }));
+  }
+
   setupAPI() {
     this.app.use(express.json({ limit: '1mb' }));
     this.app.use(express.static(path.join(__dirname, 'dashboard')));
@@ -601,6 +642,8 @@ class YouTubeAutomationAgent {
       }
       return res.json(this.decorateContentBundle(bundle));
     });
+
+    this.setupEditorAPI(protect);
 
     this.app.get('/api/content/:productionId/scenes/:sceneId/estimate', async (req, res) => {
       try {
