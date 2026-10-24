@@ -3,6 +3,7 @@ const fs = require('fs').promises;
 const { Logger } = require('../utils/logger');
 const { AIVideoGenerator } = require('../utils/ai-video-generator');
 const { SceneRepairService } = require('../utils/scene-repair-service');
+const { findFreeImages } = require('../utils/wikimedia-images');
 
 class ProductionManagementAgent {
   constructor(db, credentials) {
@@ -164,16 +165,14 @@ class ProductionManagementAgent {
     
     // Add introduction
     if (script.introduction) {
-      ttsText += `${script.introduction.greeting}\n`;
-      ttsText += `${script.introduction.topicIntro}\n`;
-      ttsText += `${script.introduction.valueProposition}\n`;
-      ttsText += `${script.introduction.credibility}\n\n`;
+      const { greeting, topicIntro, valueProposition, credibility } = script.introduction;
+      ttsText += `${[greeting, topicIntro, valueProposition, credibility].filter(Boolean).join('\n')}\n\n`;
     }
-    
+
     // Add main content
     if (script.mainContent && script.mainContent.sections) {
-      script.mainContent.sections.forEach((section, index) => {
-        ttsText += `Section ${index + 1}: ${section.title}\n`;
+      script.mainContent.sections.forEach(section => {
+        ttsText += `${section.title}\n`;
         
         if (Array.isArray(section.content)) {
           section.content.forEach(line => {
@@ -200,12 +199,9 @@ class ProductionManagementAgent {
     
     // Add conclusion
     if (script.conclusion) {
-      script.conclusion.recap.forEach(line => {
-        if (typeof line === 'string') {
-          ttsText += `${line}\n`;
-        }
-      });
-      ttsText += `\n${script.conclusion.finalThought}\n\n`;
+      const lines = [...script.conclusion.recap, script.conclusion.finalThought]
+        .filter(line => typeof line === 'string' && line);
+      ttsText += `${lines.join('\n')}\n\n`;
     }
     
     // Add CTA
@@ -298,16 +294,32 @@ class ProductionManagementAgent {
     
     try {
       const { script } = productionData;
-      
-      // Generate visual assets using DALL-E
-      const visualPrompts = this.createVisualPromptsFromScript(script);
       const visualAssets = [];
-      const profile = await this.db.getChannelProfile?.() || {};
-      const visualStyle = profile.visual_style || 'ethereal';
-      
-      for (const prompt of visualPrompts) {
-        const assets = await this.aiVideoGenerator.generateVisualAssets(prompt, visualStyle, 1);
-        visualAssets.push(...assets);
+
+      // Free, freely licensed images; falls back to AI images when nothing is found.
+      if (process.env.IMAGE_PROVIDER === 'wikimedia') {
+        const terms = [
+          ...(script.mainContent?.sections || []).flatMap(section => section.imageSearch || []),
+          ...(script.keywords || [])
+        ];
+        const directory = path.join(__dirname, '..', 'data', 'assets', productionData.id);
+        const images = await findFreeImages(terms, directory, {
+          max: Number(process.env.WIKIMEDIA_MAX_IMAGES) || 12,
+          logger: this.logger
+        });
+        this.logger.info(`Wikimedia Commons: ${images.length} free images saved to ${directory}`);
+        visualAssets.push(...images.map(image => image.path));
+      }
+
+      if (!visualAssets.length) {
+        const visualPrompts = this.createVisualPromptsFromScript(script);
+        const profile = await this.db.getChannelProfile?.() || {};
+        const visualStyle = profile.visual_style || 'ethereal';
+
+        for (const prompt of visualPrompts) {
+          const assets = await this.aiVideoGenerator.generateVisualAssets(prompt, visualStyle, 1);
+          visualAssets.push(...assets);
+        }
       }
       
       productionData.assets.video = {
@@ -461,8 +473,22 @@ class ProductionManagementAgent {
     
     const captionsPath = path.join(__dirname, '..', 'data', 'captions', `${productionData.id}_captions.srt`);
     
-    // Generate SRT captions based on script timing
-    const captions = await this.createSRTCaptions(productionData);
+    // Prefer the exact narration text spread over the real audio length; the
+    // script-timing estimate can be minutes longer than what was spoken.
+    let captions = null;
+    try {
+      const narrationPath = productionData.assets.audio?.path;
+      if (await this.aiVideoGenerator.isUsableAudioFile(narrationPath)) {
+        const [text, duration] = await Promise.all([
+          fs.readFile(productionData.assets.script.ttsPath, 'utf8'),
+          this.aiVideoGenerator.getMediaDuration(narrationPath)
+        ]);
+        if (duration > 0) captions = this.buildCaptionsFromNarration(text, duration);
+      }
+    } catch (error) {
+      this.logger.warn(`Narration-timed captions unavailable, using script timing: ${error.message}`);
+    }
+    captions = captions || await this.createSRTCaptions(productionData);
     
     await fs.mkdir(path.dirname(captionsPath), { recursive: true });
     await fs.writeFile(captionsPath, captions);
@@ -477,6 +503,33 @@ class ProductionManagementAgent {
     productionData.timeline.captionsGenerated = new Date().toISOString();
     
     return captionsPath;
+  }
+
+  // Splits the narration into captions of up to 10 words that never cross a
+  // sentence, and spreads them over the audio by length (plus a short pause
+  // per caption), so the last caption ends exactly when the audio does.
+  buildCaptionsFromNarration(text, durationSeconds) {
+    const formatTime = seconds => {
+      const ms = Math.round(seconds * 1000);
+      const pad = (value, size = 2) => String(value).padStart(size, '0');
+      return `${pad(Math.floor(ms / 3600000))}:${pad(Math.floor(ms / 60000) % 60)}:${pad(Math.floor(ms / 1000) % 60)},${pad(ms % 1000, 3)}`;
+    };
+
+    const captions = [];
+    for (const sentence of text.split(/(?<=[.!?])\s+|\n+/)) {
+      const words = sentence.trim().split(/\s+/).filter(Boolean);
+      for (let i = 0; i < words.length; i += 10) captions.push(words.slice(i, i + 10).join(' '));
+    }
+
+    const weights = captions.map(caption => caption.length + 15);
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    let elapsed = 0;
+    return captions.map((caption, index) => {
+      const start = durationSeconds * elapsed / total;
+      elapsed += weights[index];
+      const end = index === captions.length - 1 ? durationSeconds : durationSeconds * elapsed / total;
+      return `${index + 1}\n${formatTime(start)} --> ${formatTime(end)}\n${caption}\n`;
+    }).join('\n');
   }
 
   async createSRTCaptions(productionData) {

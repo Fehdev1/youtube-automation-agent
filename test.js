@@ -8,6 +8,10 @@ const path = require('path');
 const { ProductionReadinessService } = require('./utils/production-readiness-service');
 const { normalizeTags, validateYouTubeMetadata } = require('./utils/youtube-metadata-validator');
 
+// Keep the user's .env image provider out of the suite (dotenv never overrides a
+// variable that is already set), so tests use the AI-image path and no network.
+process.env.IMAGE_PROVIDER = '';
+
 class SystemTest {
   constructor() {
     this.logger = new Logger('SystemTest');
@@ -68,7 +72,9 @@ class SystemTest {
       { name: 'Engagement AI Provider Wiring', test: () => this.testEngagementAIProviderWiring() },
       { name: 'Engagement Sync Schedule', test: () => this.testEngagementSyncSchedule() },
       { name: 'Growth Experiment Refresh Schedule', test: () => this.testGrowthExperimentRefreshSchedule() },
-      { name: 'Content Language and Azure Narration', test: () => this.testContentLanguageAndAzureNarration() }
+      { name: 'Content Language and Azure Narration', test: () => this.testContentLanguageAndAzureNarration() },
+      { name: 'Wikimedia Commons Images', test: () => this.testWikimediaImages() },
+      { name: 'Spoken Script and Synced Captions', test: () => this.testSpokenScriptAndCaptions() }
     ];
 
     let passed = 0;
@@ -3766,6 +3772,7 @@ class SystemTest {
     const originalLanguage = process.env.CONTENT_LANGUAGE;
     const originalVoice = process.env.AZURE_SPEECH_VOICE;
     const originalPost = axios.post;
+    const originalRetryBase = process.env.GENERATION_RETRY_BASE_MS;
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-language-'));
 
     try {
@@ -3786,6 +3793,34 @@ class SystemTest {
       await text.generateText('Write a title.');
       if (sentPrompt !== 'Write a title.') {
         throw new Error('Prompts must be unchanged when CONTENT_LANGUAGE is not set');
+      }
+
+      // A temporarily overloaded model (503) is retried instead of falling back to a template.
+      process.env.GENERATION_RETRY_BASE_MS = '1';
+      let overloadedCalls = 0;
+      text.gemini.models.generateContent = async () => {
+        overloadedCalls++;
+        if (overloadedCalls < 3) {
+          const error = new Error('{"error":{"code":503,"message":"This model is currently experiencing high demand.","status":"UNAVAILABLE"}}');
+          error.status = 503;
+          throw error;
+        }
+        return { text: 'ok', candidates: [{ finishReason: 'STOP' }] };
+      };
+      if (await text.generateText('Write a title.') !== 'ok' || overloadedCalls !== 3) {
+        throw new Error(`A 503 from an overloaded model was not retried (calls: ${overloadedCalls})`);
+      }
+
+      let quotaCalls = 0;
+      text.gemini.models.generateContent = async () => {
+        quotaCalls++;
+        const error = new Error('{"error":{"code":429,"message":"You exceeded your current quota","status":"RESOURCE_EXHAUSTED"}}');
+        error.status = 429;
+        throw error;
+      };
+      try { await text.generateText('Write a title.'); } catch (_error) { /* expected */ }
+      if (quotaCalls !== 1) {
+        throw new Error('An exhausted quota must not be retried');
       }
 
       // Azure Speech narrates long scripts in chunks and wins over OpenAI and Gemini.
@@ -3820,11 +3855,120 @@ class SystemTest {
       }
     } finally {
       axios.post = originalPost;
+      if (originalRetryBase === undefined) delete process.env.GENERATION_RETRY_BASE_MS;
+      else process.env.GENERATION_RETRY_BASE_MS = originalRetryBase;
       if (originalLanguage === undefined) delete process.env.CONTENT_LANGUAGE;
       else process.env.CONTENT_LANGUAGE = originalLanguage;
       if (originalVoice === undefined) delete process.env.AZURE_SPEECH_VOICE;
       else process.env.AZURE_SPEECH_VOICE = originalVoice;
       await fs.rm(directory, { recursive: true, force: true });
+    }
+  }
+
+  async testWikimediaImages() {
+    const fs = require('fs').promises;
+    const os = require('os');
+    const { findFreeImages } = require('./utils/wikimedia-images');
+    const { ScriptWriterAgent } = require('./agents/script-writer-agent');
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-wikimedia-'));
+
+    const page = (title, license, width, height, extra = {}) => ({
+      title: `File:${title}`,
+      index: extra.index || 1,
+      imageinfo: [{
+        width, height,
+        thumburl: `https://upload.example/${encodeURIComponent(title)}`,
+        descriptionurl: `https://commons.example/${encodeURIComponent(title)}`,
+        extmetadata: {
+          LicenseShortName: { value: license },
+          Artist: { value: '<a href="/wiki/User:Ana">Ana Silva</a>' }
+        }
+      }]
+    });
+    const results = {
+      Mycenae: [
+        page('Lion Gate.jpg', 'CC BY-SA 4.0', 3000, 2000, { index: 2 }),
+        page('Tall vase.jpg', 'Public domain', 1500, 3000, { index: 1 }),
+        page('Private photo.jpg', 'CC BY-NC 2.0', 4000, 3000, { index: 3 }),
+        page('Tiny.jpg', 'CC0', 400, 300, { index: 4 })
+      ],
+      Ugarit: [page('Lion Gate.jpg', 'CC BY-SA 4.0', 3000, 2000), page('Ugarit tablet.png', 'Public domain', 2000, 1500, { index: 2 })],
+      Nothing: []
+    };
+    const searched = [];
+    const fetchImpl = async url => {
+      if (url.startsWith('https://upload.example/')) {
+        return { ok: true, arrayBuffer: async () => Buffer.from(`image:${decodeURIComponent(url.split('/').pop())}`) };
+      }
+      const term = new URL(url).searchParams.get('gsrsearch').replace(' filetype:bitmap', '');
+      searched.push(term);
+      const pages = Object.fromEntries((results[term] || []).map((item, i) => [i, item]));
+      return { ok: true, json: async () => ({ query: { pages } }) };
+    };
+
+    try {
+      const images = await findFreeImages(['Mycenae', 'mycenae', 'Nothing', 'Ugarit'], directory, { fetchImpl, delayMs: 0, max: 3 });
+      const names = images.map(image => image.title);
+      if (searched.join(',') !== 'Mycenae,Nothing,Ugarit') {
+        throw new Error(`Search terms were not de-duplicated (searched: ${searched.join(',')})`);
+      }
+      if (names.join('|') !== 'Lion Gate.jpg|Ugarit tablet.png|Tall vase.jpg') {
+        throw new Error(`Wrong images chosen: ${names.join('|')}`);
+      }
+      if (await fs.readFile(images[0].path, 'utf8') !== 'image:Lion Gate.jpg' || !/^01_/.test(path.basename(images[0].path))) {
+        throw new Error('Image files were not downloaded in order');
+      }
+      const credits = await fs.readFile(path.join(directory, 'CREDITOS.txt'), 'utf8');
+      if (!credits.includes('Lion Gate.jpg') || !credits.includes('Ana Silva') || !credits.includes('CC BY-SA 4.0') ||
+        credits.includes('<a') || credits.includes('Private photo')) {
+        throw new Error('Credits file is missing attribution or contains a non-free image');
+      }
+
+      // The script keeps the AI's per-section image search terms.
+      const writer = Object.create(ScriptWriterAgent.prototype);
+      const [section] = writer.normalizeAISections([{ title: 'Micenas', content: ['texto'], imageSearch: ['Mycenae', ' Lion Gate ', 42, ''] }], { topic: 'x' });
+      if (JSON.stringify(section.imageSearch) !== '["Mycenae","Lion Gate"]') {
+        throw new Error(`Section image search terms were not kept: ${JSON.stringify(section.imageSearch)}`);
+      }
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  }
+
+  async testSpokenScriptAndCaptions() {
+    const { ScriptWriterAgent } = require('./agents/script-writer-agent');
+    const { ProductionManagementAgent } = require('./agents/production-management-agent');
+
+    // The AI writes the spoken intro, conclusion and CTA instead of English templates.
+    const writer = Object.create(ScriptWriterAgent.prototype);
+    writer.logger = { info() {}, warn() {} };
+    writer.aiTextService = {
+      providerName: 'stub',
+      isAvailable: () => true,
+      generateText: async () => JSON.stringify({
+        title: 'O colapso', hook: 'Tudo caiu.',
+        introduction: 'Hoje vamos entender o colapso.',
+        sections: [{ title: 'Micenas', content: ['Micenas caiu.'], duration: 60 }],
+        conclusion: 'Foi o fim de uma era.',
+        cta: { subscribe: 'Inscreva-se.', like: 'Curta o vídeo.', comment: 'Comente sua teoria.', nextVideo: 'Veja o próximo.' },
+        claims: []
+      })
+    };
+    const script = await writer.generateScriptWithAI({ topic: 'colapso', keywords: [] }, { tone: 'x', pacing: 'y' });
+    const producer = Object.create(ProductionManagementAgent.prototype);
+    const tts = producer.formatScriptForTTS(script);
+    const expected = 'Tudo caiu.\n\nHoje vamos entender o colapso.\n\nMicenas\nMicenas caiu.\n\nFoi o fim de uma era.\n\nInscreva-se.\nCurta o vídeo.\nComente sua teoria.\n';
+    if (tts !== expected) {
+      throw new Error(`Narration text still has template or English parts:\n${JSON.stringify(tts)}`);
+    }
+
+    // Captions follow the narration text and end exactly when the audio ends.
+    const srt = producer.buildCaptionsFromNarration('Um dois três quatro cinco seis sete oito nove dez.\n\nOnze doze.', 60);
+    const blocks = srt.trim().split('\n\n');
+    const words = blocks.map(block => block.split('\n').slice(2).join(' ')).join(' ');
+    if (blocks.length !== 2 || !blocks[0].includes('00:00:00,000 -->') || !blocks[1].includes('--> 00:01:00,000') ||
+      words !== 'Um dois três quatro cinco seis sete oito nove dez. Onze doze.') {
+      throw new Error(`Captions are not aligned to the narration:\n${srt}`);
     }
   }
 

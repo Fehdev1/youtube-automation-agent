@@ -111,10 +111,12 @@ Return only valid JSON with this exact shape:
 {
   "title": "compelling title under 100 characters",
   "hook": "opening hook in one sentence",
+  "introduction": "2-3 spoken sentences that welcome the viewer and set up the topic",
   "sections": [
-    { "title": "section title", "content": ["spoken script bullet"], "duration": 60 }
+    { "title": "section title", "content": ["spoken script bullet"], "duration": 60, "imageSearch": ["Mycenae", "Lion Gate"] }
   ],
-  "cta": "clear call to action",
+  "conclusion": "3-4 spoken sentences that sum up the story and close the video",
+  "cta": { "subscribe": "spoken invitation to subscribe", "like": "spoken request to like the video", "comment": "a question viewers can answer in the comments", "nextVideo": "teaser for a related video" },
   "claims": [
     { "text": "specific factual claim a reviewer must verify", "riskLevel": "standard|high", "sourceUrls": ["exact supplied source URL"] }
   ]
@@ -135,6 +137,7 @@ Channel constraints: ${strategy.channelConstraints || 'none beyond the factual-s
 Preferred call to action: ${strategy.callToAction || 'invite the viewer to subscribe'}
 Keywords: ${(strategy.keywords || []).join(', ')}
 Research sources: ${JSON.stringify(strategy.researchSources || [])}
+For each section, imageSearch lists 2-3 short English image search terms (1-3 words each) naming concrete places, people, artifacts or civilizations shown in that section, as you would type them into Wikimedia Commons.
 Avoid fabricated statistics, unsupported claims, and fake urgency. List every externally verifiable factual claim in claims. Use only exact URLs from Research sources; use an empty sourceUrls array when the supplied sources do not support a claim.`;
 
     try {
@@ -155,12 +158,17 @@ Avoid fabricated statistics, unsupported claims, and fake urgency. List every ex
       return {
         title: String(parsed.title).slice(0, 100),
         hook: this.normalizeAIHook(parsed.hook),
-        introduction: await this.generateIntroduction(strategy),
+        // The templates are English and generic, so prefer the AI's own spoken text.
+        introduction: parsed.introduction
+          ? { greeting: '', topicIntro: String(parsed.introduction).trim(), valueProposition: '', credibility: '', duration: '0:05-0:20' }
+          : await this.generateIntroduction(strategy),
         mainContent: {
           sections,
           totalDuration: this.calculateSectionsDuration(sections)
         },
-        conclusion: await this.generateConclusion(strategy),
+        conclusion: parsed.conclusion
+          ? { type: 'conclusion', title: 'Wrapping Up', recap: [String(parsed.conclusion).trim()], finalThought: '', duration: '30 seconds' }
+          : await this.generateConclusion(strategy),
         callToAction: this.normalizeAICTA(parsed.cta, strategy),
         duration: this.estimateDuration({ sections }),
         tone: template.tone,
@@ -227,7 +235,11 @@ Avoid fabricated statistics, unsupported claims, and fake urgency. List every ex
           type: 'ai_generated',
           title: String(section.title || `${strategy.topic} Part ${index + 1}`).trim(),
           content,
-          duration: parseInt(section.duration, 10) || 60
+          duration: parseInt(section.duration, 10) || 60,
+          imageSearch: (Array.isArray(section.imageSearch) ? section.imageSearch : [])
+            .filter(term => typeof term === 'string' && term.trim())
+            .map(term => term.trim().slice(0, 60))
+            .slice(0, 3)
         };
       })
       .filter(section => section.title && section.content.length > 0);

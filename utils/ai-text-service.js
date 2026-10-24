@@ -109,8 +109,27 @@ class AITextService {
     }
   }
 
+  // Overloaded models (503 "high demand") recover within seconds, so retry them
+  // with backoff; callers otherwise fall back to a generic English template.
+  // Quota errors (429) are not retried: they last hours.
   async generateText(prompt, options = {}) {
     prompt = withContentLanguage(prompt);
+    const baseDelay = Number(process.env.GENERATION_RETRY_BASE_MS) || 1000;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this._generateTextOnce(prompt, options);
+      } catch (error) {
+        const overloaded = [500, 502, 503, 504].includes(Number(error?.status)) ||
+          /"code":\s*50[0234]|UNAVAILABLE|high demand|overloaded/i.test(error?.message || '');
+        if (!overloaded || attempt >= 3) throw error;
+        const delay = baseDelay * 2 ** (attempt + 1);
+        this.logger.warn(`${this.providerName} is overloaded; retrying in ${delay}ms (attempt ${attempt + 2} of 4)`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+
+  async _generateTextOnce(prompt, options = {}) {
     const model = options.model || this.model;
     const maxTokens = options.maxTokens || 2048;
     const temperature = options.temperature ?? 0.7;
