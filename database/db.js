@@ -622,6 +622,15 @@ class Database {
         value TEXT NOT NULL,
         description TEXT,
         updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+      )`,
+      // Media editor: one versioned project per production
+      `CREATE TABLE IF NOT EXISTS editor_projects (
+        production_id TEXT PRIMARY KEY,
+        version INTEGER NOT NULL DEFAULT 1,
+        project TEXT NOT NULL,
+        render_state TEXT,
+        export_path TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
       )`
     ];
 
@@ -1306,6 +1315,57 @@ class Database {
       );
     }
     return this.listShortClips(productionId);
+  }
+
+  async getEditorProject(productionId) {
+    const row = await this.getRow('SELECT * FROM editor_projects WHERE production_id = ?', [productionId]);
+    if (!row) return null;
+    return {
+      productionId: row.production_id,
+      version: row.version,
+      project: JSON.parse(row.project),
+      renderState: row.render_state ? JSON.parse(row.render_state) : null,
+      exportPath: row.export_path || null,
+      updatedAt: row.updated_at
+    };
+  }
+
+  // expectedVersion null creates the project; otherwise it must match the stored version.
+  async saveEditorProject(productionId, project, expectedVersion) {
+    const conflict = () => Object.assign(new Error('Este projeto foi alterado em outra aba; recarregue.'), { status: 409 });
+    if (expectedVersion === null || expectedVersion === undefined) {
+      try {
+        await this.executeQuery(
+          'INSERT INTO editor_projects (production_id, version, project) VALUES (?, 1, ?)',
+          [productionId, JSON.stringify(project)]
+        );
+      } catch (error) {
+        if (/UNIQUE|PRIMARY KEY/i.test(error.message)) throw conflict();
+        throw error;
+      }
+      return { version: 1 };
+    }
+    const result = await this.executeQuery(
+      `UPDATE editor_projects SET project = ?, version = version + 1, updated_at = CURRENT_TIMESTAMP
+       WHERE production_id = ? AND version = ?`,
+      [JSON.stringify(project), productionId, expectedVersion]
+    );
+    if (!result.changes) throw conflict();
+    return { version: expectedVersion + 1 };
+  }
+
+  async saveEditorRenderState(productionId, renderState) {
+    await this.executeQuery('UPDATE editor_projects SET render_state = ? WHERE production_id = ?',
+      [JSON.stringify(renderState), productionId]);
+  }
+
+  async saveEditorExportPath(productionId, exportPath) {
+    await this.executeQuery('UPDATE editor_projects SET export_path = ? WHERE production_id = ?', [exportPath, productionId]);
+  }
+
+  async listEditorRenderStates() {
+    const rows = await this.getAllRows('SELECT production_id, render_state FROM editor_projects WHERE render_state IS NOT NULL');
+    return rows.map(row => ({ productionId: row.production_id, renderState: JSON.parse(row.render_state) }));
   }
 
   async listShortClips(productionId) {

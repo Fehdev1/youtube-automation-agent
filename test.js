@@ -75,7 +75,8 @@ class SystemTest {
       { name: 'Content Language and Azure Narration', test: () => this.testContentLanguageAndAzureNarration() },
       { name: 'Wikimedia Commons Images', test: () => this.testWikimediaImages() },
       { name: 'Spoken Script and Synced Captions', test: () => this.testSpokenScriptAndCaptions() },
-      { name: 'Editor Project Model', test: () => this.testEditorProject() }
+      { name: 'Editor Project Model', test: () => this.testEditorProject() },
+      { name: 'Editor Persistence', test: () => this.testEditorPersistence() }
     ];
 
     let passed = 0;
@@ -4037,6 +4038,43 @@ class SystemTest {
     shortTotal.blocks[2].duration -= 2;
     const fixed = normalizeProject(shortTotal, ctx);
     assert(Math.abs(fixed.blocks.reduce((sum, b) => sum + b.duration, 0) - 60) < 0.001, 'the last block stretches to close the total');
+  }
+
+  async testEditorPersistence() {
+    const db = new Database();
+    await db.initialize();
+    const id = `test_editor_${Date.now()}`;
+    const project = { schema: 1, blocks: [{ id: 'b1', assetId: 'a', duration: 3 }] };
+    try {
+      if (await db.getEditorProject(id) !== null) throw new Error('A missing project must read as null');
+      const first = await db.saveEditorProject(id, project, null);
+      const second = await db.saveEditorProject(id, { ...project, music: null }, 1);
+      if (first.version !== 1 || second.version !== 2) throw new Error(`Versions were ${first.version}, ${second.version}`);
+      let conflict = null;
+      try { await db.saveEditorProject(id, project, 1); } catch (error) { conflict = error; }
+      if (conflict?.status !== 409) throw new Error('Saving over a stale version must fail with status 409');
+      let duplicate = null;
+      try { await db.saveEditorProject(id, project, null); } catch (error) { duplicate = error; }
+      if (duplicate?.status !== 409) throw new Error('Creating an existing project must fail with status 409');
+
+      const stored = await db.getEditorProject(id);
+      if (stored.version !== 2 || stored.project.music !== null || stored.project.blocks[0].duration !== 3) {
+        throw new Error(`Stored project did not round-trip: ${JSON.stringify(stored)}`);
+      }
+      await db.saveEditorRenderState(id, { status: 'running', percent: 10 });
+      await db.saveEditorExportPath(id, 'C:\\export\\x');
+      const reread = await db.getEditorProject(id);
+      if (reread.renderState?.status !== 'running' || reread.exportPath !== 'C:\\export\\x' || reread.version !== 2) {
+        throw new Error('Render state and export path were not stored without touching the version');
+      }
+      const states = await db.listEditorRenderStates();
+      if (!states.some(item => item.productionId === id && item.renderState.status === 'running')) {
+        throw new Error('listEditorRenderStates did not return the stored state');
+      }
+    } finally {
+      await db.executeQuery('DELETE FROM editor_projects WHERE production_id = ?', [id]).catch(() => {});
+      await db.close();
+    }
   }
 
   async testGrowthExperimentRefreshSchedule() {
