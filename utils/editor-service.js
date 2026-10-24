@@ -67,7 +67,10 @@ class EditorService {
     const { library, narrationDuration, title } = await this.load(productionId);
     let stored = await this.db.getEditorProject(productionId);
     if (!stored?.project) {
-      const imageAssetIds = library.assets.filter(asset => asset.kind === 'image' && asset.origin !== 'upload').map(asset => asset.id);
+      // Generated visuals are gradient fallbacks: use them only when there is no Wikimedia image.
+      const imagesFrom = origin => library.assets.filter(asset => asset.kind === 'image' && asset.origin === origin).map(asset => asset.id);
+      const wikimedia = imagesFrom('wikimedia');
+      const imageAssetIds = wikimedia.length ? wikimedia : imagesFrom('generated');
       const project = buildInitialProject({ narrationDuration, captions: parseSRT(library.texts.captions), imageAssetIds });
       const { version } = await this.db.saveEditorProject(productionId, project, null);
       stored = { version, project, renderState: null };

@@ -12,7 +12,7 @@
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const MINI_LABELS = {
-    overview: 'Início', operator: 'Operador', pipeline: 'Produção', calendar: 'Agenda',
+    overview: 'Início', operator: 'Operador', editor: 'Editor', pipeline: 'Produção', calendar: 'Agenda',
     analytics: 'Números', engagement: 'Público', readiness: 'Checagem', settings: 'Config.'
   };
   function ensureMiniLabels() {
@@ -32,6 +32,7 @@
   const VIEW_META = {
     overview: ['VISÃO GERAL DO OPERADOR', 'Saiba o que vem a seguir.', 'Visão geral'],
     operator: ['OPERADOR AUTÔNOMO', 'Dê a estratégia ao Lumen.', 'Operador'],
+    editor: ['EDITOR DE MÍDIA', 'Monte o vídeo sem sair do app.', 'Editor de mídia'],
     pipeline: ['PRODUÇÃO DE CONTEÚDO', 'Da ideia à publicação.', 'Produção'],
     calendar: ['PLANEJAMENTO EDITORIAL', 'Planeje antes de gerar.', 'Calendário'],
     analytics: ['DESEMPENHO', 'Transforme resultados no próximo passo.', 'Estatísticas'],

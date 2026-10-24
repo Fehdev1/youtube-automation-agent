@@ -4363,6 +4363,18 @@ class SystemTest {
       assert(broken.issues.length === 1 && !broken.canRender && /faltando/.test(broken.blockedReason), `missing file must block: ${JSON.stringify(broken.issues)}`);
       await fs.writeFile(path.join(dataDir, 'assets', 'p1', '02_img.jpg'), 'x');
 
+      // Generated visuals (gradient fallbacks) are only used when the video has no Wikimedia images.
+      await addProduction('mixed', { images: 2 });
+      const generated = path.join(dataDir, 'gradient.png');
+      await fs.writeFile(generated, 'x');
+      bundles.get('mixed').assets.video = { visualAssets: [generated] };
+      const mixed = await service.getEditor('mixed');
+      assert(mixed.project.blocks.length === 2 && mixed.project.blocks.every(b => b.assetId.startsWith('wm_')), 'generated visuals must not join Wikimedia images');
+      await addProduction('only-generated', { images: 0 });
+      bundles.get('only-generated').assets.video = { visualAssets: [generated] };
+      const onlyGenerated = await service.getEditor('only-generated');
+      assert(onlyGenerated.project.blocks.length === 1 && onlyGenerated.project.blocks[0].assetId.startsWith('gen_'), 'without Wikimedia images the generated visuals are used');
+
       await addProduction('silent', { narration: false });
       const silent = await service.getEditor('silent');
       assert(!silent.canRender && /narração/.test(silent.blockedReason), 'without narration rendering must be blocked');
