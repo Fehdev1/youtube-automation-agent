@@ -76,7 +76,8 @@ class SystemTest {
       { name: 'Wikimedia Commons Images', test: () => this.testWikimediaImages() },
       { name: 'Spoken Script and Synced Captions', test: () => this.testSpokenScriptAndCaptions() },
       { name: 'Editor Project Model', test: () => this.testEditorProject() },
-      { name: 'Editor Persistence', test: () => this.testEditorPersistence() }
+      { name: 'Editor Persistence', test: () => this.testEditorPersistence() },
+      { name: 'Editor Media Library', test: () => this.testEditorLibrary() }
     ];
 
     let passed = 0;
@@ -4074,6 +4075,74 @@ class SystemTest {
     } finally {
       await db.executeQuery('DELETE FROM editor_projects WHERE production_id = ?', [id]).catch(() => {});
       await db.close();
+    }
+  }
+
+  async testEditorLibrary() {
+    const fs = require('fs').promises;
+    const os = require('os');
+    const { buildLibrary, saveUpload, resolveAssetPath } = require('./utils/editor-library');
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-editor-lib-'));
+    const id = 'prod_lib';
+    const folder = path.join(dataDir, 'assets', id);
+    try {
+      await fs.mkdir(folder, { recursive: true });
+      await fs.writeFile(path.join(folder, '01_Lion Gate.jpg'), 'x');
+      await fs.writeFile(path.join(folder, '02_Катастрофа.png'), 'x');
+      await fs.writeFile(path.join(folder, 'CREDITOS.txt'),
+        'Imagens do Wikimedia Commons:\n\n01_Lion Gate.jpg\n  "Lion Gate.jpg" por Ana Silva, CC BY-SA 4.0\n  https://commons.example/lion\n');
+      await fs.writeFile(path.join(dataDir, 'narration.mp3'), 'x');
+      await fs.writeFile(path.join(dataDir, 'captions.srt'), '1\n00:00:00,000 --> 00:00:02,000\nOi.\n');
+      await fs.writeFile(path.join(dataDir, 'script.txt'), 'Roteiro completo');
+      await fs.writeFile(path.join(dataDir, 'visual_1.png'), 'x');
+      const bundle = {
+        id,
+        assets: {
+          audio: { path: path.join(dataDir, 'narration.mp3') },
+          captions: { path: path.join(dataDir, 'captions.srt') },
+          script: { ttsPath: path.join(dataDir, 'script.txt') },
+          video: { visualAssets: [path.join(dataDir, 'visual_1.png'), path.join(dataDir, 'visual_sim_1.info')] }
+        },
+        seo: JSON.stringify({ title: 'Título', description: 'Descrição', tags: ['a', 'b'] })
+      };
+
+      const first = await buildLibrary(bundle, { dataDir });
+      const second = await buildLibrary(bundle, { dataDir });
+      const ids = first.assets.map(asset => asset.id);
+      if (ids.join() !== second.assets.map(asset => asset.id).join()) throw new Error('Asset ids must be stable');
+      const lion = first.assets.find(asset => asset.name === '01_Lion Gate.jpg');
+      if (!lion || lion.origin !== 'wikimedia' || lion.kind !== 'image' || !/^wm_01-lion-gate_[0-9a-f]{8}$/.test(lion.id)) {
+        throw new Error(`Wikimedia image asset is wrong: ${JSON.stringify(lion)}`);
+      }
+      if (!lion.credit.includes('Ana Silva') || !lion.credit.includes('CC BY-SA 4.0')) throw new Error('Credit was not read');
+      if (!first.assets.some(asset => asset.origin === 'generated' && asset.name === 'visual_1.png')) throw new Error('Generated visual missing');
+      if (first.assets.some(asset => asset.name.endsWith('.info') || asset.name === 'CREDITOS.txt')) throw new Error('Non-media files leaked into the library');
+      if (first.narration?.id !== 'narration' || first.narration.kind !== 'audio') throw new Error('Narration asset missing');
+      if (first.texts.title !== 'Título' || first.texts.tags.join() !== 'a,b' || first.texts.script !== 'Roteiro completo' || !first.texts.captions.includes('Oi.')) {
+        throw new Error(`Texts are wrong: ${JSON.stringify(first.texts)}`);
+      }
+
+      const status = async promise => promise.then(() => 200, error => error.status);
+      if (await status(saveUpload(id, 'virus.exe', Buffer.from('x'), { dataDir })) !== 400) throw new Error('.exe upload must be rejected');
+      const huge = { length: 201 * 1024 * 1024 };
+      if (await status(saveUpload(id, 'big.mp4', huge, { dataDir })) !== 400) throw new Error('201 MB upload must be rejected');
+      const upload = await saveUpload(id, '../a b.JPG', Buffer.from('img'), { dataDir });
+      if (upload.kind !== 'image' || upload.origin !== 'upload' || path.relative(path.join(folder, 'uploads'), upload.path).startsWith('..')) {
+        throw new Error(`Upload was not stored safely: ${JSON.stringify(upload)}`);
+      }
+      const withUpload = await buildLibrary(bundle, { dataDir });
+      if (!withUpload.assets.some(asset => asset.id === upload.id)) throw new Error('Upload missing from the library');
+
+      if (resolveAssetPath(withUpload, lion.id, dataDir) !== lion.path) throw new Error('resolveAssetPath returned the wrong file');
+      const outside = { assets: [{ id: 'evil', path: path.join(os.tmpdir(), 'evil.png') }], narration: null };
+      let outsideStatus = 200;
+      try { resolveAssetPath(outside, 'evil', dataDir); } catch (error) { outsideStatus = error.status; }
+      if (outsideStatus !== 403) throw new Error('A file outside the data folder must be refused with 403');
+      let missingStatus = 200;
+      try { resolveAssetPath(withUpload, 'nope', dataDir); } catch (error) { missingStatus = error.status; }
+      if (missingStatus !== 404) throw new Error('An unknown asset must be 404');
+    } finally {
+      await fs.rm(dataDir, { recursive: true, force: true });
     }
   }
 
