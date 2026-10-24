@@ -75,7 +75,8 @@ function buildAudioArgs({ videoPath, narrationPath, music, duration, outPath }) 
   } else {
     filters.push('[nar]anull[mix]');
   }
-  filters.push('[mix]loudnorm=I=-14:TP=-1.5:LRA=11[aout]');
+  // loudnorm works at 192 kHz internally; bring the output back to the 48 kHz video standard.
+  filters.push('[mix]loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[aout]');
   return ['-y', ...inputs, '-filter_complex', filters.join(';'), '-map', '0:v', '-map', '[aout]',
     '-c:v', 'copy', '-c:a', 'aac', '-b:a', '192k', '-shortest', outPath];
 }

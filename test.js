@@ -4187,6 +4187,7 @@ class SystemTest {
     const ducked = buildAudioArgs({ videoPath: 'v.mp4', narrationPath: 'n.mp3', music, duration: 60, outPath: 'o.mp4' }).join(' ');
     assert(ducked.includes('sidechaincompress') && ducked.includes('apad') && ducked.includes('volume=0.25'), 'ducked music is wrong');
     assert(ducked.includes('loudnorm=I=-14') && ducked.includes('aac') && ducked.includes('192k'), 'loudness and audio codec are wrong');
+    assert(/loudnorm=I=-14[^;]*,aresample=48000\[aout\]/.test(ducked), 'loudnorm upsamples to 192 kHz; the output must be resampled to 48 kHz');
     const plain = buildAudioArgs({ videoPath: 'v.mp4', narrationPath: 'n.mp3', music: { ...music, duck: false }, duration: 60, outPath: 'o.mp4' }).join(' ');
     assert(!plain.includes('sidechaincompress') && plain.includes('amix'), 'music without duck is a plain mix');
     const silent = buildAudioArgs({ videoPath: 'v.mp4', narrationPath: 'n.mp3', music: null, duration: 60, outPath: 'o.mp4' }).join(' ');
@@ -4379,6 +4380,13 @@ class SystemTest {
       const silent = await service.getEditor('silent');
       assert(!silent.canRender && /narração/.test(silent.blockedReason), 'without narration rendering must be blocked');
       assert(await status(service.startRender('silent')) === 400, 'rendering without narration must be 400');
+
+      // A double click fires two requests before the first one is set up: only one may start.
+      const both = await Promise.allSettled([service.startRender('p1'), service.startRender('p1')]);
+      assert(both.filter(r => r.status === 'fulfilled').length === 1 && both.some(r => r.reason?.status === 409),
+        `two simultaneous starts must yield one render and one 409: ${JSON.stringify(both.map(r => r.status))}`);
+      finishRender.resolve();
+      await service.running;
 
       const started = await service.startRender('p1');
       assert(started.status === 'running', 'render must start');

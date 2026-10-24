@@ -135,11 +135,19 @@ class EditorService {
 
   async startRender(productionId) {
     if (this.activeId) throw new EditorError('Já existe um vídeo sendo montado; espere terminar.', 409);
-    const editor = await this.getEditor(productionId);
-    if (!editor.canRender) throw new EditorError(editor.blockedReason);
-    const { library } = await this.load(productionId);
-
+    // Claim the slot before any await, or a double click starts two renders.
     this.activeId = productionId;
+    let editor;
+    let library;
+    try {
+      editor = await this.getEditor(productionId);
+      if (!editor.canRender) throw new EditorError(editor.blockedReason);
+      ({ library } = await this.load(productionId));
+    } catch (error) {
+      this.activeId = null;
+      throw error;
+    }
+
     const outPath = path.join(this.videosDir, `${productionId}_editor_${stamp()}.mp4`);
     const state = await this.setRenderState(productionId, {
       ...IDLE, status: 'running', message: 'Preparando…', startedAt: new Date().toISOString()
