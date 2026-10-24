@@ -41,8 +41,9 @@ async function checkFFmpeg() {
   }
 }
 
-async function runFFmpeg(args) {
-  return execFileAsync(getFFmpegPath(), args, { maxBuffer: 32 * 1024 * 1024 });
+// options.cwd lets callers pass short relative file names (Windows caps a command line at 32k chars).
+async function runFFmpeg(args, options = {}) {
+  return execFileAsync(getFFmpegPath(), args, { maxBuffer: 32 * 1024 * 1024, ...options });
 }
 
 function getFFprobePath() {

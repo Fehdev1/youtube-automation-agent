@@ -77,7 +77,9 @@ class SystemTest {
       { name: 'Spoken Script and Synced Captions', test: () => this.testSpokenScriptAndCaptions() },
       { name: 'Editor Project Model', test: () => this.testEditorProject() },
       { name: 'Editor Persistence', test: () => this.testEditorPersistence() },
-      { name: 'Editor Media Library', test: () => this.testEditorLibrary() }
+      { name: 'Editor Media Library', test: () => this.testEditorLibrary() },
+      { name: 'Editor Renderer Arguments', test: () => this.testEditorRenderer() },
+      { name: 'Editor Real Render', test: () => this.testEditorRenderReal() }
     ];
 
     let passed = 0;
@@ -4143,6 +4145,93 @@ class SystemTest {
       if (missingStatus !== 404) throw new Error('An unknown asset must be 404');
     } finally {
       await fs.rm(dataDir, { recursive: true, force: true });
+    }
+  }
+
+  async testEditorRenderer() {
+    const { buildSegmentArgs, buildJoinArgs, buildAudioArgs } = require('./utils/editor-renderer');
+    const assert = (condition, message) => { if (!condition) throw new Error(message); };
+    const block = (zoom, transition = 'cut') => ({ id: 'b1', assetId: 'a', duration: 4, zoom, transition });
+    const image = { kind: 'image', path: 'img.png' };
+
+    const zoomIn = buildSegmentArgs({ block: block('in'), asset: image, duration: 4, isPortrait: false, outPath: 'seg.mp4' }).join(' ');
+    assert(zoomIn.includes('zoompan') && zoomIn.includes('1.12') && zoomIn.includes('-loop 1'), 'zoom in must use zoompan up to 1.12');
+    assert(zoomIn.includes('libx264') && zoomIn.includes('-crf 20') && zoomIn.includes('yuv420p') && zoomIn.includes('-r 30'), 'segment encoding is wrong');
+    const zoomOut = buildSegmentArgs({ block: block('out'), asset: image, duration: 4, isPortrait: false, outPath: 'seg.mp4' }).join(' ');
+    assert(zoomOut.includes("1.12-0.12"), 'zoom out must start at 1.12 and shrink');
+    const portrait = buildSegmentArgs({ block: block('none'), asset: image, duration: 4, isPortrait: true, outPath: 'seg.mp4' }).join(' ');
+    assert(portrait.includes('boxblur') && portrait.includes('overlay'), 'portrait images get a blurred background');
+    const video = buildSegmentArgs({ block: block('in'), asset: { kind: 'video', path: 'clip.mp4' }, duration: 4, isPortrait: false, outPath: 'seg.mp4' }).join(' ');
+    assert(video.includes('-stream_loop -1') && video.includes('-an'), 'videos loop and drop their sound');
+
+    const join = buildJoinArgs({
+      segments: [{ path: 's1.mp4', duration: 4.5, transition: 'cut' }, { path: 's2.mp4', duration: 4, transition: 'fade' }, { path: 's3.mp4', duration: 4, transition: 'cut' }],
+      scriptPath: 'join.txt', outPath: 'joined.mp4'
+    });
+    assert((join.script.match(/xfade/g) || []).length === 1 && join.script.includes('duration=0.5'), `exactly one fade expected: ${join.script}`);
+    assert(join.args.includes('-filter_complex_script') && join.args.includes('join.txt'), 'the filter must be read from the script file');
+    const many = buildJoinArgs({
+      segments: Array.from({ length: 60 }, (_, i) => ({ path: `seg_${String(i + 1).padStart(3, '0')}.mp4`, duration: 5.5, transition: i % 2 ? 'fade' : 'cut' })),
+      scriptPath: 'join.txt', outPath: 'joined.mp4'
+    });
+    assert(many.args.join(' ').length < 2000 && !many.args.join(' ').includes('xfade'), 'a 60-block join must keep the filter out of the command line');
+
+    const music = { path: 'song.mp3', start: 0, end: 30, volume: 0.25, duck: true };
+    const ducked = buildAudioArgs({ videoPath: 'v.mp4', narrationPath: 'n.mp3', music, duration: 60, outPath: 'o.mp4' }).join(' ');
+    assert(ducked.includes('sidechaincompress') && ducked.includes('apad') && ducked.includes('volume=0.25'), 'ducked music is wrong');
+    assert(ducked.includes('loudnorm=I=-14') && ducked.includes('aac') && ducked.includes('192k'), 'loudness and audio codec are wrong');
+    const plain = buildAudioArgs({ videoPath: 'v.mp4', narrationPath: 'n.mp3', music: { ...music, duck: false }, duration: 60, outPath: 'o.mp4' }).join(' ');
+    assert(!plain.includes('sidechaincompress') && plain.includes('amix'), 'music without duck is a plain mix');
+    const silent = buildAudioArgs({ videoPath: 'v.mp4', narrationPath: 'n.mp3', music: null, duration: 60, outPath: 'o.mp4' }).join(' ');
+    assert(!silent.includes('amix') && silent.includes('loudnorm'), 'narration alone is only normalized');
+  }
+
+  async testEditorRenderReal() {
+    const fs = require('fs').promises;
+    const os = require('os');
+    const { runFFmpeg, getMediaDuration } = require('./utils/ffmpeg');
+    const { renderProject } = require('./utils/editor-renderer');
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-editor-render-'));
+    const file = name => path.join(dir, name);
+    try {
+      await runFFmpeg(['-y', '-f', 'lavfi', '-i', 'color=c=red:s=1280x720', '-frames:v', '1', file('wide.png')]);
+      await runFFmpeg(['-y', '-f', 'lavfi', '-i', 'color=c=blue:s=720x1280', '-frames:v', '1', file('Катастрофа imagem.png')]);
+      await runFFmpeg(['-y', '-f', 'lavfi', '-i', 'testsrc=s=640x360:d=1', '-pix_fmt', 'yuv420p', file('clip.mp4')]);
+      await runFFmpeg(['-y', '-f', 'lavfi', '-i', 'sine=f=440:d=3', file('narration.mp3')]);
+      await runFFmpeg(['-y', '-f', 'lavfi', '-i', 'sine=f=220:d=1', file('song.mp3')]);
+      const library = {
+        narration: { id: 'narration', kind: 'audio', path: file('narration.mp3') },
+        assets: [
+          { id: 'wide', kind: 'image', path: file('wide.png') },
+          { id: 'clip', kind: 'video', path: file('clip.mp4') },
+          { id: 'tall', kind: 'image', path: file('Катастрофа imagem.png') },
+          { id: 'song', kind: 'audio', path: file('song.mp3') }
+        ]
+      };
+      const project = {
+        schema: 1, resolution: '1920x1080', fps: 30,
+        narration: { assetId: 'narration', duration: 3 },
+        music: { assetId: 'song', start: 0, end: 1, volume: 0.3, duck: true },
+        blocks: [
+          { id: 'b1', assetId: 'wide', duration: 1, zoom: 'in', transition: 'cut' },
+          { id: 'b2', assetId: 'clip', duration: 1, zoom: 'none', transition: 'fade' },
+          { id: 'b3', assetId: 'tall', duration: 1, zoom: 'out', transition: 'cut' }
+        ]
+      };
+      const progress = [];
+      const out = file('saída final.mp4');
+      await renderProject({ project, library, outPath: out, tempDir: path.join(dir, 'tmp'), onProgress: p => progress.push(p) });
+      const duration = await getMediaDuration(out);
+      if (Math.abs(duration - 3) > 0.2) throw new Error(`Rendered duration was ${duration}`);
+      // ffmpeg-static ships without ffprobe, so read the stream list from `ffmpeg -i`.
+      const streams = await runFFmpeg(['-i', out]).then(() => '', error => String(error.stderr || ''));
+      if (!/Stream #0:\d+.*Video: h264/.test(streams) || !/Stream #0:\d+.*Audio: aac/.test(streams)) {
+        throw new Error(`Streams were: ${streams.slice(-600)}`);
+      }
+      if (!progress.some(p => p.stage === 'segments') || progress.at(-1).percent !== 100) throw new Error('Progress was not reported');
+      if (await fs.access(path.join(dir, 'tmp')).then(() => true, () => false)) throw new Error('Temporary files were left behind');
+    } finally {
+      await fs.rm(dir, { recursive: true, force: true });
     }
   }
 
