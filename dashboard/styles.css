@@ -280,7 +280,8 @@ main { padding: 0 3.2vw 72px; min-width: 0; }
 .section-intro p, .split-heading p { color: var(--muted); margin: 7px 0 0; }
 
 /* ============ Lists & cards ============ */
-.card-list, .activity-list, .timeline, .idea-list, .calendar-list { display: grid; gap: 10px; }
+/* minmax(0, 1fr): without it the implicit column grows to a nowrap title and overflows the panel. */
+.card-list, .activity-list, .timeline, .idea-list, .calendar-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; }
 .card-list.compact { gap: 8px; }
 
 .empty {

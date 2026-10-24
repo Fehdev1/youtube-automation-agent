@@ -146,8 +146,9 @@ class AITextService {
 
       // Thinking models (gemini-3.x flash/pro) count thoughts against
       // maxOutputTokens, so a small budget can be spent before any text is
-      // written. Retry once with room for the thoughts plus the answer.
-      if (!this._hasText(text) && this._geminiFinishReason(response) === 'MAX_TOKENS') {
+      // written, or cut the answer (often JSON) short. Retry once with room
+      // for the thoughts plus the answer.
+      if (this._geminiFinishReason(response) === 'MAX_TOKENS') {
         const retryTokens = Math.max(maxTokens * 4, GEMINI_THINKING_RETRY_MIN_TOKENS);
         response = await this.gemini.models.generateContent({
           model,

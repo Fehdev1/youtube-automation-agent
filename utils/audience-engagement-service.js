@@ -574,7 +574,7 @@ Comments: ${JSON.stringify(payload)}`;
       recentThemes: insights
         .flatMap(insight => (insight.themes || []).slice(0, 3).map(theme => ({ ...theme, videoId: insight.videoId, videoTitle: insight.title })))
         .slice(0, 8),
-      evidencePolicy: 'Comments are fetched read-only from YouTube. Replies post only after operator approval, and fallback analysis never proposes drafts or ideas.'
+      evidencePolicy: 'Os comentários são só lidos do YouTube. Respostas só são publicadas depois da sua aprovação, e a análise reserva nunca sugere rascunhos nem ideias.'
     };
   }
 }

@@ -87,6 +87,8 @@ data/captions/
 data/scripts/
 data/videos/
 data/thumbnails/
+data/export/
 
 # Claude worktrees
 .claude/worktrees/
+.superpowers/

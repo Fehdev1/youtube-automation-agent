@@ -3795,6 +3795,19 @@ class SystemTest {
         throw new Error('Prompts must be unchanged when CONTENT_LANGUAGE is not set');
       }
 
+      // An answer cut off by the token budget (thinking models) is retried with more room.
+      const truncatedCalls = [];
+      text.gemini.models.generateContent = async request => {
+        truncatedCalls.push(request.config.maxOutputTokens);
+        return truncatedCalls.length === 1
+          ? { text: '{"title": "O colap', candidates: [{ finishReason: 'MAX_TOKENS' }] }
+          : { text: '{"title": "O colapso"}', candidates: [{ finishReason: 'STOP' }] };
+      };
+      const complete = await text.generateText('Write a title.', { maxTokens: 500 });
+      if (complete !== '{"title": "O colapso"}' || truncatedCalls.length !== 2 || truncatedCalls[1] <= 500) {
+        throw new Error(`A truncated MAX_TOKENS answer was not retried with a larger budget (${truncatedCalls})`);
+      }
+
       // A temporarily overloaded model (503) is retried instead of falling back to a template.
       process.env.GENERATION_RETRY_BASE_MS = '1';
       let overloadedCalls = 0;

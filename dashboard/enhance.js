@@ -12,8 +12,8 @@
   const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   const MINI_LABELS = {
-    overview: 'Home', operator: 'Operator', pipeline: 'Pipeline',
-    calendar: 'Calendar', analytics: 'Stats', readiness: 'Checks', settings: 'Setup'
+    overview: 'Início', operator: 'Operador', pipeline: 'Produção', calendar: 'Agenda',
+    analytics: 'Números', engagement: 'Público', readiness: 'Checagem', settings: 'Config.'
   };
   function ensureMiniLabels() {
     $$('.nav-item').forEach(item => {
@@ -30,13 +30,13 @@
 
   /* ---------- 1. View choreography ---------- */
   const VIEW_META = {
-    overview: ['OPERATOR OVERVIEW', 'Know what happens next.', 'Overview'],
-    operator: ['AUTONOMOUS OPERATOR', 'Give Lumen the strategy.', 'Operator'],
-    pipeline: ['CONTENT OPERATIONS', 'From idea to published.', 'Pipeline'],
-    calendar: ['EDITORIAL PLANNING', 'Plan before you generate.', 'Calendar'],
-    analytics: ['PERFORMANCE', 'Turn results into the next move.', 'Analytics'],
-    readiness: ['PRODUCTION READINESS', 'Verify before autonomy runs.', 'Readiness'],
-    settings: ['CHANNEL GUARDRAILS', 'Make every agent sound like you.', 'Setup']
+    overview: ['VISÃO GERAL DO OPERADOR', 'Saiba o que vem a seguir.', 'Visão geral'],
+    operator: ['OPERADOR AUTÔNOMO', 'Dê a estratégia ao Lumen.', 'Operador'],
+    pipeline: ['PRODUÇÃO DE CONTEÚDO', 'Da ideia à publicação.', 'Produção'],
+    calendar: ['PLANEJAMENTO EDITORIAL', 'Planeje antes de gerar.', 'Calendário'],
+    analytics: ['DESEMPENHO', 'Transforme resultados no próximo passo.', 'Estatísticas'],
+    readiness: ['PRONTIDÃO DA PRODUÇÃO', 'Verifique antes de rodar no automático.', 'Prontidão'],
+    settings: ['REGRAS DO CANAL', 'Faça cada agente falar como você.', 'Configuração']
   };
   let currentView = 'overview';
   const baseSwitchView = window.switchView;
@@ -109,14 +109,14 @@
   const palette = document.createElement('div');
   palette.className = 'cmdk-backdrop hidden';
   palette.innerHTML = `
-    <div class="cmdk" role="dialog" aria-modal="true" aria-label="Command palette">
+    <div class="cmdk" role="dialog" aria-modal="true" aria-label="Paleta de comandos">
       <div class="cmdk-head">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-        <input class="cmdk-input" type="text" placeholder="Jump to a view, run a command…" aria-label="Command input" autocomplete="off" spellcheck="false">
+        <input class="cmdk-input" type="text" placeholder="Ir para uma tela, rodar um comando…" aria-label="Comando" autocomplete="off" spellcheck="false">
         <kbd>esc</kbd>
       </div>
-      <div class="cmdk-list" role="listbox" aria-label="Commands"></div>
-      <div class="cmdk-foot"><span><kbd>↑</kbd><kbd>↓</kbd> navigate</span><span><kbd>↵</kbd> run</span><span class="cmdk-brand">Lumen console</span></div>
+      <div class="cmdk-list" role="listbox" aria-label="Comandos"></div>
+      <div class="cmdk-foot"><span><kbd>↑</kbd><kbd>↓</kbd> navegar</span><span><kbd>↵</kbd> rodar</span><span class="cmdk-brand">Console Lumen</span></div>
     </div>`;
   document.body.appendChild(palette);
   const listEl = palette.querySelector('.cmdk-list');
@@ -124,22 +124,22 @@
 
   function buildCommands() {
     const cmds = Object.entries(VIEW_META).map(([id, meta]) => ({
-      group: 'Navigate', icon: 'view', label: meta[2] === 'Setup' ? 'Channel setup' : meta[2],
+      group: 'Navegar', icon: 'view', label: meta[2] === 'Configuração' ? 'Configuração do canal' : meta[2],
       hint: meta[1], keywords: id, run: () => window.switchView(id)
     }));
     const action = (label, hint, selector, keywords) => ({
-      group: 'Actions', icon: 'action', label, hint, keywords,
+      group: 'Ações', icon: 'action', label, hint, keywords,
       run: () => { const el = $(selector); if (el) el.click(); }
     });
     cmds.push(
-      action('Create video', 'Queue a new generation job', '#generate-button', 'generate new video create'),
-      action('Add backlog idea', 'Save a topic for later', '#add-idea-button', 'idea backlog topic'),
-      action('Run verified readiness check', 'Prove the production path', '#run-readiness-button', 'readiness verify dry run check'),
+      action('Criar vídeo', 'Colocar uma nova geração na fila', '#generate-button', 'generate new video create'),
+      action('Adicionar ideia', 'Guardar um tema para depois', '#add-idea-button', 'idea backlog topic'),
+      action('Rodar verificação de prontidão', 'Testar o caminho da produção', '#run-readiness-button', 'readiness verify dry run check'),
       ui.state?.system?.automationPaused
-        ? action('Resume automation', 'Unpause the scheduler', '#automation-toggle', 'resume unpause automation play')
-        : action('Pause automation', 'Halt scheduled generation', '#automation-toggle', 'pause halt automation stop'),
-      action('Refresh dashboard data', 'Pull latest state now', '#refresh-button', 'refresh reload sync data'),
-      action('Set dashboard API key', 'Store access key in this browser', '#api-key-button', 'api key auth credentials')
+        ? action('Retomar automação', 'Despausar o agendador', '#automation-toggle', 'resume unpause automation play')
+        : action('Pausar automação', 'Parar a geração agendada', '#automation-toggle', 'pause halt automation stop'),
+      action('Atualizar dados do painel', 'Buscar o estado mais recente', '#refresh-button', 'refresh reload sync data'),
+      action('Definir chave de API do painel', 'Guardar a chave de acesso neste navegador', '#api-key-button', 'api key auth credentials')
     );
     return cmds;
   }
@@ -159,7 +159,7 @@
     filtered = q ? cmds.filter(c => `${c.label} ${c.hint} ${c.keywords}`.toLowerCase().includes(q)) : cmds;
     selected = Math.min(selected, Math.max(0, filtered.length - 1));
     if (!filtered.length) {
-      listEl.innerHTML = '<div class="cmdk-empty">No matching commands.</div>';
+      listEl.innerHTML = '<div class="cmdk-empty">Nenhum comando encontrado.</div>';
       return;
     }
     let lastGroup = '';
@@ -245,8 +245,8 @@
   // Visible trigger in the topbar
   const trigger = document.createElement('button');
   trigger.className = 'kbd-trigger';
-  trigger.setAttribute('aria-label', 'Open command palette');
-  trigger.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Search</span><kbd>Ctrl K</kbd>';
+  trigger.setAttribute('aria-label', 'Abrir paleta de comandos');
+  trigger.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span>Buscar</span><kbd>Ctrl K</kbd>';
   trigger.addEventListener('click', openPalette);
   $('.top-actions').prepend(trigger);
 

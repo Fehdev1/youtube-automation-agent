@@ -189,8 +189,8 @@ class AutonomousChannelOperator {
       await this.notify({
         type: 'autonomous_run_complete',
         level: failed.length ? 'warning' : 'success',
-        title: needsReview.length ? 'Autonomous plan is ready for review' : 'Autonomous plan completed',
-        message: `${completed.length} of ${plan.length} planned videos finished production.`,
+        title: needsReview.length ? 'Plano automático pronto para revisão' : 'Plano automático concluído',
+        message: `${completed.length} de ${plan.length} vídeos planejados terminaram a produção.`,
         data: { runId, ...summary }
       });
     } catch (error) {
@@ -205,7 +205,7 @@ class AutonomousChannelOperator {
         await this.notify({
           type: 'autonomous_run_failure',
           level: 'error',
-          title: 'Autonomous channel run failed',
+          title: 'A rodada automática do canal falhou',
           message: error.message,
           data: { runId }
         });

@@ -520,7 +520,7 @@ class YouTubeAutomationAgent {
                 videosTracked: 0, pendingDrafts: 0, postedToday: 0, needsAttentionCount: 0,
                 pendingAudienceIdeas: 0, postingEnabled: false, postingDisabledReason: 'setup_required',
                 insights: [], recentThemes: [],
-                evidencePolicy: 'Comments are fetched read-only from YouTube. Replies post only after operator approval, and fallback analysis never proposes drafts or ideas.'
+                evidencePolicy: 'Os comentários são só lidos do YouTube. Respostas só são publicadas depois da sua aprovação, e a análise reserva nunca sugere rascunhos nem ideias.'
               }),
           this.experiments
             ? this.experiments.getSummary()
@@ -970,7 +970,7 @@ class YouTubeAutomationAgent {
       await this.operator.notify({
         type: 'learning_recommendation_reviewed',
         level: action === 'approve' ? 'success' : 'info',
-        title: action === 'approve' ? 'Channel learning approved' : 'Channel learning rejected',
+        title: action === 'approve' ? 'Aprendizado do canal aprovado' : 'Aprendizado do canal rejeitado',
         message: recommendation.title,
         data: { recommendationId, status }
       });
@@ -1083,7 +1083,7 @@ class YouTubeAutomationAgent {
         await this.operator.notify({
           type: 'growth_experiment_updated',
           level: ['adopt', 'approve'].includes(req.params.action) ? 'success' : 'info',
-          title: `Growth experiment ${req.params.action}`,
+          title: `Teste de crescimento: ${{ approve: 'aprovado', start: 'iniciado', refresh: 'atualizado', adopt: 'vencedor adotado', cancel: 'cancelado' }[req.params.action] || req.params.action}`,
           message: experiment.title,
           data: { experimentId: experiment.id, status: experiment.status }
         });
@@ -1195,8 +1195,8 @@ class YouTubeAutomationAgent {
           await this.operator.notify({
             type: 'audience_reply_posted',
             level: 'success',
-            title: 'Audience reply posted',
-            message: `A reply was posted on video ${result.videoId}`,
+            title: 'Resposta ao público publicada',
+            message: `Uma resposta foi publicada no vídeo ${result.videoId}`,
             data: { draftId: result.id, videoId: result.videoId, postedCommentId: result.postedCommentId }
           });
         } catch (notifyError) {
@@ -1436,7 +1436,7 @@ class YouTubeAutomationAgent {
       await this.operator.notify({
         type: cancelled ? 'generation_cancelled' : 'generation_failure',
         level: cancelled ? 'warning' : 'error',
-        title: cancelled ? 'Generation cancelled' : 'Generation failed',
+        title: cancelled ? 'Geração cancelada' : 'Geração falhou',
         message: error.message,
         data: { jobId }
       });
@@ -1566,8 +1566,8 @@ class YouTubeAutomationAgent {
         await this.operator.notify({
           type: 'review_required',
           level: quality.passed ? 'info' : 'warning',
-          title: quality.passed ? 'Content ready for review' : 'Content needs attention',
-          message: `${script.title} ${quality.passed ? 'is ready for approval' : 'failed one or more quality checks'}`,
+          title: quality.passed ? 'Conteúdo pronto para revisão' : 'Conteúdo precisa de atenção',
+          message: `${script.title} ${quality.passed ? 'está pronto para aprovação' : 'não passou em uma ou mais checagens de qualidade'}`,
           data: { contentId, qualityScore: quality.score }
         });
       }
@@ -1832,8 +1832,8 @@ class YouTubeAutomationAgent {
     });
     await this.db.updateProductionStatus(bundle.id, 'scheduled');
     await this.operator.notify({
-      type: 'content_approved', level: 'success', title: 'Content approved',
-      message: `${productionData.script.title} is scheduled for ${scheduleEntry.publishTime}`,
+      type: 'content_approved', level: 'success', title: 'Conteúdo aprovado',
+      message: `${productionData.script.title} está agendado para ${new Date(scheduleEntry.publishTime).toLocaleString('pt-BR')}`,
       data: { productionId, publishTime: scheduleEntry.publishTime }
     });
     return { productionId, reviewStatus: 'approved', qualityScore: quality.score, schedule: scheduleEntry };

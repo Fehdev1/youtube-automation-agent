@@ -559,7 +559,7 @@ class DailyAutomation {
       await this.db.createNotification({
         type: 'automation_failure',
         level: 'error',
-        title: `${taskName} failed`,
+        title: `A tarefa ${taskName} falhou`,
         message: error.message
       });
     }

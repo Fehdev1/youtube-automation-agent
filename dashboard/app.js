@@ -25,7 +25,7 @@ function apiKey() {
 }
 
 function requestApiKey() {
-  const key = prompt('Enter the API_KEY value from your .env. It stays in this browser only.', apiKey());
+  const key = prompt('Digite o valor de API_KEY do seu .env. Ele fica salvo só neste navegador.', apiKey());
   if (key !== null) localStorage.setItem('yaa_api_key', key.trim());
   return key;
 }
@@ -43,7 +43,7 @@ async function api(url, options = {}, retry = true) {
   if (response.status === 401 && retry && requestApiKey() !== null) return api(url, options, false);
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(data.error || response.statusText || 'Request failed');
+    const error = new Error(data.error || response.statusText || 'A requisição falhou');
     error.data = data;
     throw error;
   }
@@ -63,9 +63,9 @@ function empty(message) {
 }
 
 function formatDate(value, includeTime = true) {
-  if (!value) return 'Not scheduled';
+  if (!value) return 'Não agendado';
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Not scheduled';
+  if (Number.isNaN(date.getTime())) return 'Não agendado';
   return new Intl.DateTimeFormat(undefined, {
     month: 'short', day: 'numeric',
     ...(ui.state?.profile?.timezone ? { timeZone: ui.state.profile.timezone } : {}),
@@ -76,14 +76,36 @@ function formatDate(value, includeTime = true) {
 function timeAgo(value) {
   if (!value) return '';
   const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
-  if (seconds < 60) return 'just now';
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
-  return `${Math.floor(seconds / 86400)}d ago`;
+  if (seconds < 60) return 'agora mesmo';
+  if (seconds < 3600) return `há ${Math.floor(seconds / 60)} min`;
+  if (seconds < 86400) return `há ${Math.floor(seconds / 3600)} h`;
+  return `há ${Math.floor(seconds / 86400)} d`;
 }
 
+// Portuguese names for the status, stage and category codes the API returns.
+const LABELS = {
+  unknown: 'desconhecido', needs_review: 'aguardando revisão', needs_attention: 'precisa de atenção',
+  approved: 'aprovado', rejected: 'rejeitado', published: 'publicado', scheduled: 'agendado',
+  simulated: 'simulado', completed: 'concluído', cancelled: 'cancelado', canceled: 'cancelado',
+  failed: 'falhou', interrupted: 'interrompido', queued: 'na fila', running: 'em andamento',
+  pending: 'pendente', succeeded: 'concluído', passed: 'aprovado', warning: 'com avisos',
+  unverified: 'não verificado', skipped: 'ignorado', blocked: 'bloqueado', ready: 'pronto',
+  active: 'ativo', paused: 'pausado', draft: 'rascunho', dismissed: 'descartado', backlog: 'no banco',
+  generating: 'gerando', generated: 'gerado', processing: 'processando', uploaded: 'enviado',
+  info: 'informação', error: 'erro', success: 'sucesso', high: 'alta', medium: 'média', low: 'baixa',
+  strategy: 'estratégia', script: 'roteiro', thumbnail: 'thumbnail', seo: 'SEO',
+  production: 'produção', quality_review: 'revisão de qualidade', narration: 'narração',
+  title: 'título', pacing: 'ritmo', format: 'formato', topic: 'tema', hook: 'gancho',
+  slideshow: 'slideshow', unavailable: 'indisponível', stale: 'desatualizado',
+  not_configured: 'não configurado', completed_with_issues: 'concluído com problemas',
+  cancelling: 'cancelando', awaiting_winner: 'aguardando vencedor', action_required: 'ação necessária',
+  posted: 'publicado', discarded: 'descartado', positive: 'positivo', neutral: 'neutro', negative: 'negativo',
+  dropoff: 'queda', rewatch: 'revisto', steady: 'estável', audience_demand: 'pedido do público'
+};
+
 function label(value) {
-  return String(value || 'unknown').replaceAll('_', ' ');
+  const key = String(value || 'unknown');
+  return LABELS[key.toLowerCase()] || key.replaceAll('_', ' ');
 }
 
 function statusChip(value) {
@@ -99,7 +121,7 @@ async function refreshDashboard(silent = false) {
     ui.state = await api('/api/dashboard');
     renderDashboard();
   } catch (error) {
-    $('#system-label').textContent = 'Dashboard unavailable';
+    $('#system-label').textContent = 'Painel indisponível';
     $('#system-dot').classList.remove('online');
     if (!silent) showToast(error.message, 'error');
   } finally {
@@ -117,10 +139,10 @@ function renderDashboard() {
   $('#brand-name').textContent = state.profile?.channel_name || 'Automation Studio';
   $('#setup-banner').classList.toggle('hidden', !state.system.setupRequired);
   $('#system-label').textContent = state.system.setupRequired
-    ? 'Setup required'
-    : state.system.automationPaused ? 'Automation paused' : `${state.system.agents.length} agents online`;
+    ? 'Configuração pendente'
+    : state.system.automationPaused ? 'Automação pausada' : `${state.system.agents.length} agentes ativos`;
   $('#system-dot').classList.toggle('online', state.system.initialized && !state.system.automationPaused && !state.system.setupRequired);
-  $('#automation-toggle').textContent = state.system.automationPaused ? 'Resume automation' : 'Pause automation';
+  $('#automation-toggle').textContent = state.system.automationPaused ? 'Retomar automação' : 'Pausar automação';
   $('#automation-toggle').disabled = state.system.setupRequired;
   $('#generate-button').disabled = state.system.setupRequired;
   $('#review-badge').textContent = reviews.length;
@@ -151,50 +173,50 @@ function renderReadiness(readiness = {}) {
   const status = readiness.status || 'unverified';
   const statusNode = $('#readiness-status');
   statusNode.className = `status ${escapeHTML(status)}`;
-  statusNode.textContent = readiness.stale && status !== 'unverified' ? `${label(status)} · stale` : label(status);
+  statusNode.textContent = readiness.stale && status !== 'unverified' ? `${label(status)} · desatualizado` : label(status);
 
   const titles = {
-    passed: 'The production path is verified.',
-    warning: 'Core checks passed with warnings.',
-    failed: 'Automation is blocked until this is fixed.',
-    unverified: 'Prove the pipeline, without uploading.'
+    passed: 'O caminho da produção está verificado.',
+    warning: 'As verificações principais passaram, com avisos.',
+    failed: 'A automação está travada até isto ser corrigido.',
+    unverified: 'Teste a produção sem enviar nada.'
   };
   $('#readiness-title').textContent = titles[status] || titles.unverified;
   const counts = readiness.summary || {};
   $('#readiness-summary').textContent = status === 'unverified'
-    ? 'The check makes small live text and narration requests, verifies channel access, builds a local audio/video MP4, and validates queued metadata. It never creates or uploads a YouTube video.'
-    : `${counts.passed || 0} passed, ${counts.warnings || 0} warning${counts.warnings === 1 ? '' : 's'}, and ${counts.failed || 0} failed.`;
+    ? 'A verificação faz pequenos pedidos reais de texto e narração, confere o acesso ao canal, monta um MP4 local com áudio e vídeo e valida os metadados da fila. Ela nunca cria nem envia vídeo ao YouTube.'
+    : `${counts.passed || 0} aprovadas, ${counts.warnings || 0} com aviso e ${counts.failed || 0} com falha.`;
   $('#readiness-meta').textContent = readiness.completed_at
-    ? `Last run ${formatDate(readiness.completed_at)}${readiness.stale ? ' · older than 24 hours' : ''}`
-    : 'No readiness run recorded.';
+    ? `Última verificação: ${formatDate(readiness.completed_at)}${readiness.stale ? ' · há mais de 24 horas' : ''}`
+    : 'Nenhuma verificação registrada.';
 
   const checks = Array.isArray(readiness.checks) ? readiness.checks : [];
   $('#readiness-checks').innerHTML = checks.length ? checks.map(check => `
     <article class="readiness-check ${escapeHTML(check.status)}">
-      <div class="readiness-check-heading"><span class="readiness-icon" aria-hidden="true">${check.status === 'passed' ? '✓' : check.status === 'failed' ? '×' : '!'}</span><div><strong>${escapeHTML(check.label)}</strong><div class="meta-line">${escapeHTML(label(check.status))}${check.blocking ? ' · blocking' : ' · optional'} · ${(check.durationMs || 0) / 1000}s</div></div></div>
+      <div class="readiness-check-heading"><span class="readiness-icon" aria-hidden="true">${check.status === 'passed' ? '✓' : check.status === 'failed' ? '×' : '!'}</span><div><strong>${escapeHTML(check.label)}</strong><div class="meta-line">${escapeHTML(label(check.status))}${check.blocking ? ' · obrigatória' : ' · opcional'} · ${(check.durationMs || 0) / 1000}s</div></div></div>
       <p>${escapeHTML(check.message)}</p>
-      ${check.remediation ? `<small><strong>Next:</strong> ${escapeHTML(check.remediation)}</small>` : ''}
-    </article>`).join('') : empty('Run the verified check to inspect every production dependency.');
+      ${check.remediation ? `<small><strong>Próximo passo:</strong> ${escapeHTML(check.remediation)}</small>` : ''}
+    </article>`).join('') : empty('Rode a verificação para checar cada parte da produção.');
 }
 
 function renderReviews(reviews) {
   const container = $('#review-list');
   if (!reviews.length) {
-    container.innerHTML = empty('Nothing is waiting. New content will appear here after quality review.');
+    container.innerHTML = empty('Nada aguardando. Novos vídeos aparecem aqui depois da revisão de qualidade.');
     return;
   }
   container.innerHTML = reviews.slice(0, 5).map(item => `
     <article class="review-card">
       ${item.hasThumbnail ? `<img class="review-thumb" src="/api/content/${encodeURIComponent(item.id)}/asset/thumbnail" alt="">` : '<div class="review-thumb"></div>'}
-      <div class="review-meta"><strong>${escapeHTML(item.title)}</strong><div class="meta-line">${statusChip(item.review_status)} · Quality ${qualityScore(item.qualityChecks)}%</div></div>
-      <button class="button secondary small" data-open-content="${escapeHTML(item.id)}">Review</button>
+      <div class="review-meta"><strong>${escapeHTML(item.title)}</strong><div class="meta-line">${statusChip(item.review_status)} · Qualidade ${qualityScore(item.qualityChecks)}%</div></div>
+      <button class="button secondary small" data-open-content="${escapeHTML(item.id)}">Revisar</button>
     </article>`).join('');
 }
 
 function renderJobs(jobs) {
   const container = $('#job-list');
   if (!jobs.length) {
-    container.innerHTML = empty('No generation runs yet.');
+    container.innerHTML = empty('Nenhuma geração ainda.');
     return;
   }
   const stages = ['strategy', 'script', 'thumbnail', 'seo', 'production', 'quality_review'];
@@ -209,14 +231,14 @@ function renderJobs(jobs) {
     return `
     <article class="job-card">
       <div class="job-meta">
-        <strong>${escapeHTML(job.title || job.topic || 'Agent-selected topic')}</strong>
+        <strong>${escapeHTML(job.title || job.topic || 'Tema escolhido pelo agente')}</strong>
         <div class="meta-line">${statusChip(job.status)} · ${escapeHTML(label(job.stage))} · ${timeAgo(job.updated_at)}</div>
-        ${checkpoints.length ? `<div class="checkpoint-line">${completed.size}/${stages.length} stages saved${job.details?.reusedStages?.length ? ` · ${job.details.reusedStages.length} reused` : ''}</div>` : ''}
-        ${mediaTasks.length ? `<div class="checkpoint-line">Video: ${mediaCompleted}/${mediaTasks.length} clips ready · ${escapeHTML(mediaProviders)}</div>` : ''}
+        ${checkpoints.length ? `<div class="checkpoint-line">${completed.size}/${stages.length} etapas salvas${job.details?.reusedStages?.length ? ` · ${job.details.reusedStages.length} reaproveitadas` : ''}</div>` : ''}
+        ${mediaTasks.length ? `<div class="checkpoint-line">Vídeo: ${mediaCompleted}/${mediaTasks.length} clipes prontos · ${escapeHTML(mediaProviders)}</div>` : ''}
         <div class="progress"><i style="width:${Math.max(0, Math.min(100, job.progress || 0))}%"></i></div>
       </div>
-      ${['queued', 'running'].includes(job.status) ? `<button class="text-button" data-cancel-job="${escapeHTML(job.id)}">Cancel</button>` : ''}
-      ${recoverable ? `<div class="job-recovery"><select data-resume-stage-for="${escapeHTML(job.id)}" aria-label="Stage to resume from">${stages.map(stage => `<option value="${stage}" ${stage === resumeFrom ? 'selected' : ''}>${escapeHTML(label(stage))}</option>`).join('')}</select><button class="button secondary small" data-resume-job="${escapeHTML(job.id)}">Resume</button></div>` : ''}
+      ${['queued', 'running'].includes(job.status) ? `<button class="text-button" data-cancel-job="${escapeHTML(job.id)}">Cancelar</button>` : ''}
+      ${recoverable ? `<div class="job-recovery"><select data-resume-stage-for="${escapeHTML(job.id)}" aria-label="Etapa de onde retomar">${stages.map(stage => `<option value="${stage}" ${stage === resumeFrom ? 'selected' : ''}>${escapeHTML(label(stage))}</option>`).join('')}</select><button class="button secondary small" data-resume-job="${escapeHTML(job.id)}">Retomar</button></div>` : ''}
     </article>`;
   }).join('');
 }
@@ -224,14 +246,14 @@ function renderJobs(jobs) {
 function renderSchedule(schedule, selector) {
   const container = $(selector);
   if (!schedule.length) {
-    container.innerHTML = empty('No approved videos are scheduled.');
+    container.innerHTML = empty('Nenhum vídeo aprovado está agendado.');
     return;
   }
   container.innerHTML = schedule.map(item => `
     <div class="timeline-item">
       <div class="date-chip"><small>${escapeHTML(new Date(item.publish_time).toLocaleDateString(undefined, { month: 'short' }))}</small><strong>${escapeHTML(new Date(item.publish_time).getDate())}</strong></div>
       <div class="timeline-meta"><strong>${escapeHTML(item.title)}</strong><div class="meta-line">${formatDate(item.publish_time)} · ${statusChip(item.status)}</div></div>
-      <button class="text-button" data-open-content="${escapeHTML(item.production_id)}">View</button>
+      <button class="text-button" data-open-content="${escapeHTML(item.production_id)}">Ver</button>
     </div>`).join('');
 }
 
@@ -241,7 +263,7 @@ function renderNotifications(notifications, events) {
     : events.map(event => ({ level: event.status === 'error' ? 'error' : 'info', title: label(event.event_type), message: event.data?.error || label(event.status), created_at: event.created_at }));
   const container = $('#notification-list');
   if (!items.length) {
-    container.innerHTML = empty('No activity has been recorded yet.');
+    container.innerHTML = empty('Nenhuma atividade registrada ainda.');
     return;
   }
   container.innerHTML = items.slice(0, 7).map(item => `
@@ -259,16 +281,16 @@ function renderPipeline(items) {
   );
   const container = $('#pipeline-list');
   if (!filtered.length) {
-    container.innerHTML = empty('No content matches this view.');
+    container.innerHTML = empty('Nenhum conteúdo neste filtro.');
     return;
   }
   container.innerHTML = filtered.map(item => {
     const state = item.schedule_status || item.review_status || item.status;
     const next = nextAction(item);
     return `<article class="pipeline-item" data-open-content="${escapeHTML(item.id)}">
-      <div class="pipeline-title"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.topic || 'No topic recorded')} · ${formatDate(item.created_at)}</span></div>
-      <div class="pipeline-col"><span>State</span><strong>${statusChip(state)}</strong></div>
-      <div class="pipeline-col"><span>Quality</span><strong>${qualityScore(item.qualityChecks)} / 100</strong></div>
+      <div class="pipeline-title"><strong>${escapeHTML(item.title)}</strong><span>${escapeHTML(item.topic || 'Sem tema registrado')} · ${formatDate(item.created_at)}</span></div>
+      <div class="pipeline-col"><span>Estado</span><strong>${statusChip(state)}</strong></div>
+      <div class="pipeline-col"><span>Qualidade</span><strong>${qualityScore(item.qualityChecks)} / 100</strong></div>
       <button class="button secondary small">${escapeHTML(next)} →</button>
     </article>`;
   }).join('');
@@ -280,11 +302,11 @@ function qualityScore(checks) {
 }
 
 function nextAction(item) {
-  if (item.schedule_status === 'published') return 'View';
-  if (item.review_status === 'needs_attention') return 'Fix issues';
-  if (item.review_status === 'needs_review') return 'Review';
-  if (item.schedule_status === 'scheduled') return 'Scheduled';
-  return 'Inspect';
+  if (item.schedule_status === 'published') return 'Ver';
+  if (item.review_status === 'needs_attention') return 'Corrigir';
+  if (item.review_status === 'needs_review') return 'Revisar';
+  if (item.schedule_status === 'scheduled') return 'Agendado';
+  return 'Inspecionar';
 }
 
 function renderCalendar(schedule) {
@@ -294,13 +316,13 @@ function renderCalendar(schedule) {
 function renderIdeas(ideas) {
   const container = $('#idea-list');
   if (!ideas.length) {
-    container.innerHTML = empty('Add promising topics here before spending generation credits.');
+    container.innerHTML = empty('Adicione temas promissores aqui antes de gastar com a geração.');
     return;
   }
   container.innerHTML = ideas.map(idea => `
     <article class="idea-card">
-      <div class="idea-meta"><strong>${escapeHTML(idea.topic)}</strong><div class="meta-line">${escapeHTML(idea.angle || idea.rationale || 'No angle added')} · ${statusChip(idea.status)}</div></div>
-      ${idea.status === 'backlog' ? `<button class="button secondary small" data-generate-idea="${escapeHTML(idea.id)}">Generate</button>` : ''}
+      <div class="idea-meta"><strong>${escapeHTML(idea.topic)}</strong><div class="meta-line">${escapeHTML(idea.angle || idea.rationale || 'Sem ângulo definido')} · ${statusChip(idea.status)}</div></div>
+      ${idea.status === 'backlog' ? `<button class="button secondary small" data-generate-idea="${escapeHTML(idea.id)}">Gerar</button>` : ''}
     </article>`).join('');
 }
 
@@ -311,11 +333,11 @@ function renderAnalytics(analytics, learning = {}) {
   const approved = (learning.recommendations || []).find(item => item.status === 'approved');
   const pending = (learning.recommendations || []).find(item => item.status === 'pending');
   $('#analytics-action').textContent = approved?.title || pending?.title || insights[0] || (analytics.totalVideos
-    ? 'Keep collecting results; recommendations get stronger with more published videos.'
-    : 'Publish and analyze the first video to unlock performance recommendations.');
+    ? 'Continue coletando resultados: as recomendações melhoram com mais vídeos publicados.'
+    : 'Publique e analise o primeiro vídeo para liberar as recomendações.');
   const performers = Array.isArray(analytics.topPerformers) ? analytics.topPerformers : [];
   $('#top-performers').innerHTML = performers.length ? performers.map(item => `
-    <article class="performer-card"><strong>${escapeHTML(item.videoDetails?.title || item.title || 'Untitled video')}</strong><div class="meta-line">Performance ${escapeHTML(item.performance?.score ?? item.performance_score ?? '—')} / 100</div></article>`).join('') : empty('No analyzed videos yet.');
+    <article class="performer-card"><strong>${escapeHTML(item.videoDetails?.title || item.title || 'Vídeo sem título')}</strong><div class="meta-line">Desempenho ${escapeHTML(item.performance?.score ?? item.performance_score ?? '—')} / 100</div></article>`).join('') : empty('Nenhum vídeo analisado ainda.');
   renderOutcome(learning.outcome || {});
   renderLearning(learning);
   renderRetention(learning.retention || {});
@@ -338,39 +360,39 @@ function renderChannelSnapshot(snapshot) {
   const container = $('#channel-snapshot');
   const note = $('#channel-snapshot-note');
   if (!snapshot.available) {
-    $('#channel-snapshot-title').textContent = 'Channel snapshot';
-    container.innerHTML = empty(snapshot.reason || 'Channel statistics are unavailable.');
-    note.textContent = 'Whole-channel totals from YouTube, including videos published outside Lumen.';
+    $('#channel-snapshot-title').textContent = 'Resumo do canal';
+    container.innerHTML = empty(snapshot.reason || 'As estatísticas do canal estão indisponíveis.');
+    note.textContent = 'Totais do canal inteiro no YouTube, incluindo vídeos publicados fora do Lumen.';
     return;
   }
   // null means YouTube did not provide the value; it is shown as unavailable, never as 0.
-  const count = value => (value === null || value === undefined ? 'Unavailable' : Number(value).toLocaleString());
+  const count = value => (value === null || value === undefined ? 'Indisponível' : Number(value).toLocaleString('pt-BR'));
   const tile = (name, value, hint = '') => `<div><span>${escapeHTML(name)}</span><strong>${escapeHTML(value)}</strong>${hint ? `<small>${escapeHTML(hint)}</small>` : ''}</div>`;
   const { channel, recent = {} } = snapshot;
-  $('#channel-snapshot-title').textContent = channel.title || 'Channel snapshot';
-  let html = '<p class="channel-snapshot-section">Lifetime</p>'
-    + tile('Subscribers', channel.subscribersHidden ? 'Hidden' : count(channel.subscribers), channel.subscribersHidden ? 'hidden on this channel' : '')
-    + tile('Views', count(channel.views))
-    + tile('Videos', count(channel.videos))
-    + tile('Updated', timeAgo(snapshot.fetchedAt) || 'just now');
-  html += `<p class="channel-snapshot-section">Last 28 days${recent.startDate ? ` · ${escapeHTML(recent.startDate)} to ${escapeHTML(recent.endDate)}` : ''}</p>`;
+  $('#channel-snapshot-title').textContent = channel.title || 'Resumo do canal';
+  let html = '<p class="channel-snapshot-section">Desde o início</p>'
+    + tile('Inscritos', channel.subscribersHidden ? 'Oculto' : count(channel.subscribers), channel.subscribersHidden ? 'oculto neste canal' : '')
+    + tile('Visualizações', count(channel.views))
+    + tile('Vídeos', count(channel.videos))
+    + tile('Atualizado', timeAgo(snapshot.fetchedAt) || 'agora mesmo');
+  html += `<p class="channel-snapshot-section">Últimos 28 dias${recent.startDate ? ` · ${escapeHTML(recent.startDate)} a ${escapeHTML(recent.endDate)}` : ''}</p>`;
   if (recent.available) {
     const net = Number(recent.netSubscribers);
-    html += tile('Views', count(recent.views))
-      + tile('Watch hours', count(recent.watchHours))
-      + tile('Subscribers gained', count(recent.subscribersGained), `${count(recent.subscribersLost)} lost`)
-      + tile('Net subscribers', `${net > 0 ? '+' : ''}${count(net)}`);
+    html += tile('Visualizações', count(recent.views))
+      + tile('Horas assistidas', count(recent.watchHours))
+      + tile('Inscritos ganhos', count(recent.subscribersGained), `${count(recent.subscribersLost)} perdidos`)
+      + tile('Inscritos líquidos', `${net > 0 ? '+' : ''}${count(net)}`);
   } else {
-    html += `<div class="empty">${escapeHTML(recent.reason || '28-day analytics are unavailable.')}${recent.activationUrl ? ` <a href="${escapeHTML(recent.activationUrl)}" target="_blank" rel="noopener noreferrer">Enable YouTube Analytics API</a>` : ''}</div>`;
+    html += `<div class="empty">${escapeHTML(recent.reason || 'As estatísticas de 28 dias estão indisponíveis.')}${recent.activationUrl ? ` <a href="${escapeHTML(recent.activationUrl)}" target="_blank" rel="noopener noreferrer">Ativar a API YouTube Analytics</a>` : ''}</div>`;
   }
   container.innerHTML = html;
-  note.textContent = 'Whole-channel totals from YouTube, including videos published outside Lumen. Analytics data lags about two days.';
+  note.textContent = 'Totais do canal inteiro no YouTube, incluindo vídeos publicados fora do Lumen. As estatísticas chegam com cerca de dois dias de atraso.';
 }
 
 function formatOutcomeValue(value, kind = 'number', currency = 'USD') {
-  if (value === null || value === undefined) return 'Unavailable';
+  if (value === null || value === undefined) return 'Indisponível';
   const number = Number(value);
-  if (!Number.isFinite(number)) return 'Unavailable';
+  if (!Number.isFinite(number)) return 'Indisponível';
   if (kind === 'currency') {
     try {
       return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(number);
@@ -386,72 +408,72 @@ function formatOutcomeValue(value, kind = 'number', currency = 'USD') {
 function renderOutcome(outcome = {}) {
   const status = $('#outcome-status');
   if (!outcome.configured || !outcome.goal) {
-    status.textContent = 'Not configured';
+    status.textContent = 'Não configurado';
     status.className = 'status';
-    $('#outcome-summary').innerHTML = empty('Choose a measurable primary outcome in the Autonomous Operator strategy.');
+    $('#outcome-summary').innerHTML = empty('Escolha uma meta principal mensurável na estratégia do Operador autônomo.');
     $('#outcome-economics').innerHTML = '';
     $('#outcome-breakdowns').innerHTML = '';
-    $('#outcome-policy').textContent = outcome.evidencePolicy || 'Configure a primary outcome to activate goal-aligned learning.';
+    $('#outcome-policy').textContent = outcome.evidencePolicy || 'Configure uma meta principal para ativar o aprendizado alinhado ao objetivo.';
     return;
   }
   const { goal, economics = {}, coverage = {}, breakdowns = {} } = outcome;
-  status.textContent = outcome.available ? 'Measuring' : 'Awaiting evidence';
+  status.textContent = outcome.available ? 'Medindo' : 'Aguardando dados';
   status.className = `status ${outcome.available ? 'active' : ''}`;
   const target = goal.targetValue === null
-    ? `No numeric target · ${goal.windowDays}-day evidence window`
-    : `${formatOutcomeValue(goal.targetValue, goal.unit, goal.currency)} target · ${goal.windowDays} days`;
+    ? `Sem meta numérica · janela de ${goal.windowDays} dias`
+    : `meta de ${formatOutcomeValue(goal.targetValue, goal.unit, goal.currency)} · ${goal.windowDays} dias`;
   const progress = outcome.progressPercent === null ? null : Math.min(100, Number(outcome.progressPercent));
   $('#outcome-summary').innerHTML = `
     <div class="outcome-primary">
       <span>${escapeHTML(goal.label)}</span>
-      <strong>${escapeHTML(outcome.formattedObserved || 'Unavailable')}</strong>
-      <small>${escapeHTML(target)} · ${Number(outcome.measuredVideoCount || 0)} measured videos</small>
-      ${progress === null ? '' : `<div class="outcome-progress" role="progressbar" aria-label="Outcome target progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="width:${progress}%"></span></div><small>${Number(outcome.progressPercent).toFixed(1)}% of target from stored measurement windows</small>`}
+      <strong>${escapeHTML(outcome.formattedObserved || 'Indisponível')}</strong>
+      <small>${escapeHTML(target)} · ${Number(outcome.measuredVideoCount || 0)} vídeos medidos</small>
+      ${progress === null ? '' : `<div class="outcome-progress" role="progressbar" aria-label="Progresso da meta" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="width:${progress}%"></span></div><small>${Number(outcome.progressPercent).toFixed(1)}% da meta, pelas medições salvas</small>`}
     </div>`;
   const economicsRows = [
-    ['Net subscribers', economics.netSubscribers, 'number', coverage.subscribers],
-    ['Watch hours', economics.watchHours, 'hours', null],
-    ['Estimated revenue', economics.estimatedRevenue, 'currency', coverage.revenue],
-    ['Known production cost', economics.knownProductionCost, 'currency', coverage.cost],
-    ['Estimated ROI', economics.roi, 'percent', null],
-    ['Budget used', economics.budgetUsedPercent, 'percent', null]
+    ['Inscritos líquidos', economics.netSubscribers, 'number', coverage.subscribers],
+    ['Horas assistidas', economics.watchHours, 'hours', null],
+    ['Receita estimada', economics.estimatedRevenue, 'currency', coverage.revenue],
+    ['Custo de produção conhecido', economics.knownProductionCost, 'currency', coverage.cost],
+    ['Retorno estimado (ROI)', economics.roi, 'percent', null],
+    ['Orçamento usado', economics.budgetUsedPercent, 'percent', null]
   ];
   $('#outcome-economics').innerHTML = economicsRows.map(([name, value, kind, metricCoverage]) => `
-    <div><span>${escapeHTML(name)}</span><strong>${escapeHTML(formatOutcomeValue(value, kind, economics.currency || goal.currency))}</strong>${metricCoverage ? `<small>${Number(metricCoverage.measured || 0)}/${Number(metricCoverage.total || 0)} videos measured</small>` : ''}</div>`).join('');
+    <div><span>${escapeHTML(name)}</span><strong>${escapeHTML(formatOutcomeValue(value, kind, economics.currency || goal.currency))}</strong>${metricCoverage ? `<small>${Number(metricCoverage.measured || 0)}/${Number(metricCoverage.total || 0)} vídeos medidos</small>` : ''}</div>`).join('');
   const dimensions = [
-    ['pillar', 'Content pillars'], ['format', 'Formats'], ['provider', 'Production providers']
+    ['pillar', 'Pilares de conteúdo'], ['format', 'Formatos'], ['provider', 'Provedores de produção']
   ].filter(([key]) => Array.isArray(breakdowns[key]) && breakdowns[key].length);
   $('#outcome-breakdowns').innerHTML = dimensions.length ? dimensions.map(([key, heading]) => `
     <section><h3>${escapeHTML(heading)}</h3>${breakdowns[key].slice(0, 5).map(item => `
-      <div class="outcome-breakdown-row"><span>${escapeHTML(label(item.name))}<small>${Number(item.count || 0)} video${Number(item.count || 0) === 1 ? '' : 's'}</small></span><strong>${escapeHTML(formatOutcomeValue(item.average, goal.unit, goal.currency))} avg</strong></div>`).join('')}</section>`).join('') : empty('Breakdowns appear once measured videos carry comparable pillar, format, or provider evidence.');
+      <div class="outcome-breakdown-row"><span>${escapeHTML(label(item.name))}<small>${Number(item.count || 0)} vídeo${Number(item.count || 0) === 1 ? '' : 's'}</small></span><strong>média ${escapeHTML(formatOutcomeValue(item.average, goal.unit, goal.currency))}</strong></div>`).join('')}</section>`).join('') : empty('Os detalhamentos aparecem quando houver vídeos medidos com pilar, formato ou provedor comparáveis.');
   $('#outcome-policy').textContent = outcome.evidencePolicy;
 }
 
 function renderLearning(learning = {}) {
   const baseline = learning.baseline || {};
-  $('#learning-snapshot-count').textContent = `${learning.snapshotCount || 0} snapshots`;
-  $('#learning-approved-count').textContent = `${learning.approvedCount || 0} approved`;
+  $('#learning-snapshot-count').textContent = `${learning.snapshotCount || 0} registros`;
+  $('#learning-approved-count').textContent = `${learning.approvedCount || 0} aprovadas`;
   const metrics = [
     ['CTR', baseline.ctr, '%'],
-    ['Retention', baseline.retention, '%'],
-    ['Engagement', baseline.engagementRate, '%'],
-    ['Performance', baseline.performanceScore, '/100']
+    ['Retenção', baseline.retention, '%'],
+    ['Engajamento', baseline.engagementRate, '%'],
+    ['Desempenho', baseline.performanceScore, '/100']
   ];
   $('#learning-baseline').innerHTML = learning.measuredVideos ? metrics.map(([name, value, suffix]) => `
-    <div><span>${escapeHTML(name)}</span><strong>${Number(value || 0).toFixed(1)}${escapeHTML(suffix)}</strong></div>`).join('') : empty('Two real measurements unlock evidence-backed recommendations.');
+    <div><span>${escapeHTML(name)}</span><strong>${Number(value || 0).toFixed(1)}${escapeHTML(suffix)}</strong></div>`).join('') : empty('Duas medições reais liberam recomendações baseadas em dados.');
 
   const recommendations = Array.isArray(learning.recommendations) ? learning.recommendations : [];
   $('#learning-recommendations').innerHTML = recommendations.length ? recommendations.map(item => `
     <article class="learning-card">
       <div class="learning-card-heading"><strong>${escapeHTML(item.title)}</strong>${statusChip(item.status)}</div>
       <p>${escapeHTML(item.rationale)}</p>
-      <div class="learning-meta"><span>${escapeHTML(label(item.category))} · ${escapeHTML(label(item.confidence))} confidence</span>
+      <div class="learning-meta"><span>${escapeHTML(label(item.category))} · confiança ${escapeHTML(label(item.confidence))}</span>
         <span class="learning-actions">
-          ${item.status !== 'approved' ? `<button class="text-button approve" data-learning-action="approve" data-learning-id="${escapeHTML(item.id)}">Approve</button>` : ''}
-          ${item.status !== 'rejected' ? `<button class="text-button" data-learning-action="reject" data-learning-id="${escapeHTML(item.id)}">Reject</button>` : ''}
+          ${item.status !== 'approved' ? `<button class="text-button approve" data-learning-action="approve" data-learning-id="${escapeHTML(item.id)}">Aprovar</button>` : ''}
+          ${item.status !== 'rejected' ? `<button class="text-button" data-learning-action="reject" data-learning-id="${escapeHTML(item.id)}">Rejeitar</button>` : ''}
         </span>
       </div>
-    </article>`).join('') : empty('No recommendation yet. Lumen needs at least two real, sufficiently exposed measurements.');
+    </article>`).join('') : empty('Nenhuma recomendação ainda. O Lumen precisa de pelo menos duas medições reais com público suficiente.');
 }
 
 function renderGrowthExperiments(summary = {}) {
@@ -461,40 +483,40 @@ function renderGrowthExperiments(summary = {}) {
   const create = $('#experiment-create-button');
   candidate.innerHTML = candidates.length
     ? candidates.map(item => `<option value="${escapeHTML(item.productionId)}">${escapeHTML(item.title || item.productionId)}</option>`).join('')
-    : '<option value="">No eligible published variants</option>';
+    : '<option value="">Nenhum vídeo publicado elegível</option>';
   candidate.disabled = !candidates.length;
   create.disabled = !candidates.length;
-  $('#experiment-status').textContent = `${Number(summary.activeCount || 0)} running · ${Number(summary.awaitingDecisionCount || 0)} decision${Number(summary.awaitingDecisionCount || 0) === 1 ? '' : 's'}`;
-  $('#experiment-policy').textContent = summary.evidencePolicy || 'Only real YouTube evidence advances controlled tests.';
+  $('#experiment-status').textContent = `${Number(summary.activeCount || 0)} em andamento · ${Number(summary.awaitingDecisionCount || 0)} decis${Number(summary.awaitingDecisionCount || 0) === 1 ? 'ão' : 'ões'}`;
+  $('#experiment-policy').textContent = summary.evidencePolicy || 'Só dados reais do YouTube fazem os testes avançarem.';
 
   $('#growth-experiments').innerHTML = experiments.length ? experiments.map(experiment => {
     const winner = experiment.arms?.find(arm => arm.id === experiment.winningArmId);
     const actions = [];
-    if (experiment.status === 'draft') actions.push(`<button class="text-button approve" data-experiment-action="approve" data-experiment-id="${escapeHTML(experiment.id)}">Approve plan</button>`);
-    if (experiment.status === 'approved') actions.push(`<button class="button primary small" data-experiment-action="start" data-experiment-id="${escapeHTML(experiment.id)}">Start live test</button>`);
+    if (experiment.status === 'draft') actions.push(`<button class="text-button approve" data-experiment-action="approve" data-experiment-id="${escapeHTML(experiment.id)}">Aprovar plano</button>`);
+    if (experiment.status === 'approved') actions.push(`<button class="button primary small" data-experiment-action="start" data-experiment-id="${escapeHTML(experiment.id)}">Começar teste real</button>`);
     if (experiment.status === 'running') {
-      actions.push(`<button class="button secondary small" data-experiment-action="refresh" data-experiment-id="${escapeHTML(experiment.id)}">Refresh evidence</button>`);
-      actions.push(`<button class="text-button" data-experiment-action="cancel" data-experiment-id="${escapeHTML(experiment.id)}">Cancel &amp; restore control</button>`);
+      actions.push(`<button class="button secondary small" data-experiment-action="refresh" data-experiment-id="${escapeHTML(experiment.id)}">Atualizar dados</button>`);
+      actions.push(`<button class="text-button" data-experiment-action="cancel" data-experiment-id="${escapeHTML(experiment.id)}">Cancelar e restaurar original</button>`);
     }
-    if (experiment.status === 'action_required') actions.push(`<button class="text-button" data-experiment-action="cancel" data-experiment-id="${escapeHTML(experiment.id)}">Retry control restore</button>`);
-    if (experiment.status === 'awaiting_winner') actions.push(`<button class="button primary small" data-experiment-action="adopt" data-experiment-id="${escapeHTML(experiment.id)}">Adopt ${escapeHTML(winner?.label || 'winner')}</button>`);
+    if (experiment.status === 'action_required') actions.push(`<button class="text-button" data-experiment-action="cancel" data-experiment-id="${escapeHTML(experiment.id)}">Tentar restaurar original de novo</button>`);
+    if (experiment.status === 'awaiting_winner') actions.push(`<button class="button primary small" data-experiment-action="adopt" data-experiment-id="${escapeHTML(experiment.id)}">Adotar ${escapeHTML(winner?.label || 'vencedor')}</button>`);
     const arms = (experiment.arms || []).map(arm => {
       const result = arm.result || {};
       const active = arm.id === experiment.currentArmId && experiment.status === 'running';
       return `<div class="experiment-arm ${active ? 'active' : ''} ${arm.id === experiment.winningArmId ? 'winner' : ''}">
-        <div><strong>${escapeHTML(arm.label)}</strong>${arm.isControl ? '<small>Control</small>' : ''}</div>
+        <div><strong>${escapeHTML(arm.label)}</strong>${arm.isControl ? '<small>Original</small>' : ''}</div>
         <span>${escapeHTML(arm.title)}</span>
-        <div class="experiment-arm-metrics"><b>${Number(result.ctr || 0).toFixed(2)}% CTR</b><small>${Number(result.impressions || 0).toLocaleString()} impressions</small></div>
+        <div class="experiment-arm-metrics"><b>${Number(result.ctr || 0).toFixed(2)}% CTR</b><small>${Number(result.impressions || 0).toLocaleString()} impressões</small></div>
       </div>`;
     }).join('');
     return `<article class="growth-experiment-card">
       <div class="learning-card-heading"><strong>${escapeHTML(experiment.title)}</strong>${statusChip(experiment.status)}</div>
       <p>${escapeHTML(experiment.hypothesis)}</p>
       <div class="experiment-arm-list">${arms}</div>
-      ${experiment.result?.reason ? `<p class="experiment-result"><strong>Result:</strong> ${escapeHTML(experiment.result.reason)}${experiment.result.liftPercent !== undefined ? ` · ${escapeHTML(experiment.result.liftPercent)}% lift` : ''}</p>` : ''}
-      <div class="learning-meta"><span>${Number(experiment.armDurationHours || 0)}h per arm · ${Number(experiment.minImpressions || 0).toLocaleString()} minimum impressions</span><span class="learning-actions">${actions.join('')}</span></div>
+      ${experiment.result?.reason ? `<p class="experiment-result"><strong>Resultado:</strong> ${escapeHTML(experiment.result.reason)}${experiment.result.liftPercent !== undefined ? ` · ${escapeHTML(experiment.result.liftPercent)}% de melhora` : ''}</p>` : ''}
+      <div class="learning-meta"><span>${Number(experiment.armDurationHours || 0)} h por variação · ${Number(experiment.minImpressions || 0).toLocaleString()} impressões mínimas</span><span class="learning-actions">${actions.join('')}</span></div>
     </article>`;
-  }).join('') : empty('Publish content with approved-learning title and thumbnail variants to create the first controlled test.');
+  }).join('') : empty('Publique um vídeo com variações aprovadas de título e thumbnail para criar o primeiro teste.');
 }
 
 function renderRetention(retention = {}) {
@@ -503,11 +525,11 @@ function renderRetention(retention = {}) {
   const refresh = $('#refresh-retention-button');
   if (!snapshots.length) {
     ui.retentionSnapshotId = null;
-    select.innerHTML = '<option value="">No measured curves yet</option>';
+    select.innerHTML = '<option value="">Nenhuma curva medida ainda</option>';
     select.disabled = true;
     refresh.disabled = true;
     $('#retention-meta').innerHTML = '';
-    $('#retention-chart').innerHTML = empty('Retention curves appear after a published video reaches a real analytics measurement window.');
+    $('#retention-chart').innerHTML = empty('As curvas de retenção aparecem quando um vídeo publicado tiver estatísticas reais suficientes.');
     $('#retention-scenes').innerHTML = '';
     return;
   }
@@ -522,49 +544,49 @@ function renderRetention(retention = {}) {
 
   const summary = snapshot.summary || {};
   $('#retention-meta').innerHTML = [
-    `${snapshot.points?.length || 0} real points`,
-    `${snapshot.sceneMetrics?.length || 0} scenes`,
-    `${summary.dropoffCount || 0} drop-offs`,
-    `${summary.rewatchCount || 0} rewatch signals`,
-    `${escapeHTML(label(snapshot.confidence))} confidence`,
-    `${escapeHTML(snapshot.measurementWindow)} window`
+    `${snapshot.points?.length || 0} pontos reais`,
+    `${snapshot.sceneMetrics?.length || 0} cenas`,
+    `${summary.dropoffCount || 0} quedas`,
+    `${summary.rewatchCount || 0} trechos revistos`,
+    `confiança ${escapeHTML(label(snapshot.confidence))}`,
+    `janela ${escapeHTML(snapshot.measurementWindow)}`
   ].map(item => `<span>${item}</span>`).join('');
   $('#retention-chart').innerHTML = retentionChart(snapshot);
   $('#retention-scenes').innerHTML = (snapshot.sceneMetrics || []).map(scene => `
     <article class="retention-scene ${escapeHTML(scene.signal)}">
-      <div class="retention-scene-heading"><div><span>Scene ${Number(scene.position || 0) + 1}</span><strong>${escapeHTML(scene.label)}</strong></div>${statusChip(scene.signal)}</div>
+      <div class="retention-scene-heading"><div><span>Cena ${Number(scene.position || 0) + 1}</span><strong>${escapeHTML(scene.label)}</strong></div>${statusChip(scene.signal)}</div>
       <div class="retention-metrics">
-        <div><span>Average watching</span><strong>${(Number(scene.averageWatchRatio || 0) * 100).toFixed(1)}%</strong></div>
-        <div><span>Scene change</span><strong>${Number(scene.changePoints || 0) > 0 ? '+' : ''}${Number(scene.changePoints || 0).toFixed(1)} pts</strong></div>
-        <div><span>Relative retention</span><strong>${(Number(scene.averageRelativeRetention || 0) * 100).toFixed(1)}%</strong></div>
-        <div><span>Sharpest drop</span><strong>${Number(scene.largestDropPoints || 0).toFixed(1)} pts</strong></div>
+        <div><span>Assistindo em média</span><strong>${(Number(scene.averageWatchRatio || 0) * 100).toFixed(1)}%</strong></div>
+        <div><span>Variação na cena</span><strong>${Number(scene.changePoints || 0) > 0 ? '+' : ''}${Number(scene.changePoints || 0).toFixed(1)} pts</strong></div>
+        <div><span>Retenção relativa</span><strong>${(Number(scene.averageRelativeRetention || 0) * 100).toFixed(1)}%</strong></div>
+        <div><span>Maior queda</span><strong>${Number(scene.largestDropPoints || 0).toFixed(1)} pts</strong></div>
       </div>
-    </article>`).join('') || empty('The saved curve could not be mapped to a scene timeline.');
+    </article>`).join('') || empty('Não foi possível relacionar a curva salva à linha do tempo das cenas.');
 }
 
 function renderEngagement(engagement = {}) {
   $('#engagement-policy').textContent = engagement.evidencePolicy || '';
   const posting = $('#engagement-posting-status');
-  posting.textContent = engagement.postingEnabled ? 'posting enabled' : 'posting locked';
+  posting.textContent = engagement.postingEnabled ? 'publicação liberada' : 'publicação bloqueada';
   posting.className = `status ${engagement.postingEnabled ? 'success' : 'warning'}`;
-  posting.title = engagement.postingEnabled ? '' : 'Re-authorize YouTube (npm run walkthrough) to grant the comment permission.';
-  $('#engagement-drafts-count').textContent = `${engagement.pendingDrafts || 0} drafts`;
-  $('#engagement-attention-count').textContent = `${engagement.needsAttentionCount || 0} flagged`;
-  $('#engagement-ideas-count').textContent = `${engagement.pendingAudienceIdeas || 0} pending`;
+  posting.title = engagement.postingEnabled ? '' : 'Autorize o YouTube de novo (npm run walkthrough) para liberar a permissão de comentários.';
+  $('#engagement-drafts-count').textContent = `${engagement.pendingDrafts || 0} rascunhos`;
+  $('#engagement-attention-count').textContent = `${engagement.needsAttentionCount || 0} sinalizados`;
+  $('#engagement-ideas-count').textContent = `${engagement.pendingAudienceIdeas || 0} pendentes`;
 
   const insights = Array.isArray(engagement.insights) ? engagement.insights : [];
   const select = $('#engagement-video-select');
   if (!insights.length) {
     ui.engagementVideoId = null;
     ui.engagementDetail = null;
-    select.innerHTML = '<option value="">No synced videos yet</option>';
+    select.innerHTML = '<option value="">Nenhum vídeo sincronizado ainda</option>';
     select.disabled = true;
     $('#engagement-sync-button').disabled = true;
     $('#engagement-draft-button').disabled = true;
     $('#engagement-meta').innerHTML = '';
-    $('#engagement-themes').innerHTML = empty('Comments appear after a published video is synced.');
-    $('#engagement-drafts').innerHTML = empty('Draft replies from a synced video to review them here.');
-    $('#engagement-attention').innerHTML = empty('Nothing flagged as spam, scam, or toxic.');
+    $('#engagement-themes').innerHTML = empty('Os comentários aparecem depois que um vídeo publicado é sincronizado.');
+    $('#engagement-drafts').innerHTML = empty('Rascunhe respostas de um vídeo sincronizado para revisá-las aqui.');
+    $('#engagement-attention').innerHTML = empty('Nada sinalizado como spam, golpe ou ofensivo.');
   } else {
     if (!insights.some(item => item.videoId === ui.engagementVideoId)) ui.engagementVideoId = insights[0].videoId;
     select.disabled = false;
@@ -588,10 +610,10 @@ function renderEngagementDetail() {
   const sentiment = insight.sentiment || {};
   const fallback = insight.analysisMethod === 'fallback';
   $('#engagement-meta').innerHTML = [
-    `${insight.commentCount || 0} comments`,
-    `${insight.analyzedCount || 0} analyzed`,
-    fallback ? 'AI analysis unavailable — mechanical facts only' : `${sentiment.positive || 0} positive · ${sentiment.neutral || 0} neutral · ${sentiment.negative || 0} negative`,
-    insight.lastSyncedAt ? `synced ${new Date(insight.lastSyncedAt).toLocaleString()}` : 'never synced'
+    `${insight.commentCount || 0} comentários`,
+    `${insight.analyzedCount || 0} analisados`,
+    fallback ? 'Análise por IA indisponível: só dados básicos' : `${sentiment.positive || 0} positivos · ${sentiment.neutral || 0} neutros · ${sentiment.negative || 0} negativos`,
+    insight.lastSyncedAt ? `sincronizado em ${new Date(insight.lastSyncedAt).toLocaleString('pt-BR')}` : 'nunca sincronizado'
   ].map(item => `<span>${escapeHTML(item)}</span>`).join('');
 
   const themes = Array.isArray(insight.themes) ? insight.themes : [];
@@ -599,8 +621,8 @@ function renderEngagementDetail() {
     <article class="learning-card">
       <div class="learning-card-heading"><strong>${escapeHTML(theme.title)}</strong>${statusChip(theme.kind)}</div>
       <p>${escapeHTML(theme.summary)}</p>
-      <div class="learning-meta"><span>${escapeHTML(String(theme.count || 0))} comments</span></div>
-    </article>`).join('') : empty(fallback ? 'Themes need a working AI text provider.' : 'No recurring themes yet.');
+      <div class="learning-meta"><span>${escapeHTML(String(theme.count || 0))} comentários</span></div>
+    </article>`).join('') : empty(fallback ? 'Os temas precisam de um provedor de texto de IA funcionando.' : 'Nenhum tema recorrente ainda.');
 
   const commentsById = new Map((detail.comments || []).map(comment => [comment.commentId, comment]));
   const postingEnabled = ui.state?.engagement?.postingEnabled === true;
@@ -612,17 +634,17 @@ function renderEngagementDetail() {
     const locked = draft.status === 'posted';
     return `
     <article class="comment-card" data-reply-card="${escapeHTML(draft.id)}">
-      <div class="learning-card-heading"><strong>${escapeHTML(comment.authorName || 'Viewer')}</strong>${statusChip(draft.status)}</div>
+      <div class="learning-card-heading"><strong>${escapeHTML(comment.authorName || 'Espectador')}</strong>${statusChip(draft.status)}</div>
       <p class="comment-original">${escapeHTML(comment.text || '')}</p>
-      <label><span>Reply</span><textarea data-reply-text maxlength="1000" ${locked ? 'disabled' : ''}>${escapeHTML(draft.editedText || draft.draftText)}</textarea></label>
-      ${draft.failureReason ? `<p class="meta-line">Last attempt failed: ${escapeHTML(draft.failureReason)}</p>` : ''}
+      <label><span>Resposta</span><textarea data-reply-text maxlength="1000" ${locked ? 'disabled' : ''}>${escapeHTML(draft.editedText || draft.draftText)}</textarea></label>
+      ${draft.failureReason ? `<p class="meta-line">A última tentativa falhou: ${escapeHTML(draft.failureReason)}</p>` : ''}
       <div class="learning-actions">
-        ${locked ? '' : `<button class="button primary small" data-reply-approve="${escapeHTML(draft.id)}" ${postingEnabled ? '' : 'disabled title="Re-authorize YouTube to enable posting"'}>Approve &amp; post</button>
-        <button class="text-button" data-reply-save="${escapeHTML(draft.id)}">Save edit</button>
-        <button class="text-button danger-text" data-reply-discard="${escapeHTML(draft.id)}">Discard</button>`}
+        ${locked ? '' : `<button class="button primary small" data-reply-approve="${escapeHTML(draft.id)}" ${postingEnabled ? '' : 'disabled title="Autorize o YouTube de novo para liberar a publicação"'}>Aprovar e publicar</button>
+        <button class="text-button" data-reply-save="${escapeHTML(draft.id)}">Salvar edição</button>
+        <button class="text-button danger-text" data-reply-discard="${escapeHTML(draft.id)}">Descartar</button>`}
       </div>
     </article>`;
-  }).join('') : empty('No reply drafts for this video yet.');
+  }).join('') : empty('Nenhum rascunho de resposta para este vídeo ainda.');
   // Guard the focused textarea only: a clicked action button also holds focus, and skipping
   // the rebuild for it would leave the panel showing pre-action state.
   const editingReply = draftsContainer.contains(document.activeElement)
@@ -636,9 +658,9 @@ function renderEngagementDetail() {
     <article class="comment-card">
       <div class="learning-card-heading"><strong>${escapeHTML((flag.categories || []).join(', '))}</strong></div>
       <p class="comment-original">${escapeHTML(comment.text || '')}</p>
-      <a class="text-button" href="${escapeHTML(flag.permalink || '#')}" target="_blank" rel="noopener noreferrer">Open on YouTube</a>
+      <a class="text-button" href="${escapeHTML(flag.permalink || '#')}" target="_blank" rel="noopener noreferrer">Abrir no YouTube</a>
     </article>`;
-  }).join('') : empty('Nothing flagged as spam, scam, or toxic.');
+  }).join('') : empty('Nada sinalizado como spam, golpe ou ofensivo.');
 }
 
 async function loadEngagementDetail(videoId) {
@@ -656,18 +678,18 @@ function renderAudienceIdeas() {
     <article class="learning-card">
       <div class="learning-card-heading"><strong>${escapeHTML(item.title)}</strong>${statusChip(item.status)}</div>
       <p>${escapeHTML(item.rationale)}</p>
-      <div class="learning-meta"><span>${escapeHTML(label(item.confidence))} confidence</span>
+      <div class="learning-meta"><span>confiança ${escapeHTML(label(item.confidence))}</span>
         <span class="learning-actions">
-          ${item.status !== 'approved' ? `<button class="text-button approve" data-learning-action="approve" data-learning-id="${escapeHTML(item.id)}">Approve</button>` : ''}
-          ${item.status !== 'rejected' ? `<button class="text-button" data-learning-action="reject" data-learning-id="${escapeHTML(item.id)}">Reject</button>` : ''}
+          ${item.status !== 'approved' ? `<button class="text-button approve" data-learning-action="approve" data-learning-id="${escapeHTML(item.id)}">Aprovar</button>` : ''}
+          ${item.status !== 'rejected' ? `<button class="text-button" data-learning-action="reject" data-learning-id="${escapeHTML(item.id)}">Rejeitar</button>` : ''}
         </span>
       </div>
-    </article>`).join('') : empty('Mined audience requests appear here once comment analysis finds repeated asks.');
+    </article>`).join('') : empty('Os pedidos do público aparecem aqui quando a análise de comentários encontrar pedidos repetidos.');
 }
 
 function retentionChart(snapshot = {}) {
   const points = Array.isArray(snapshot.points) ? snapshot.points : [];
-  if (points.length < 2) return empty('This snapshot does not contain enough points for a curve.');
+  if (points.length < 2) return empty('Este registro não tem pontos suficientes para uma curva.');
   const width = 1000;
   const height = 280;
   const left = 46;
@@ -691,12 +713,12 @@ function retentionChart(snapshot = {}) {
     return `<line x1="${left}" y1="${lineY.toFixed(1)}" x2="${width - right}" y2="${lineY.toFixed(1)}" class="retention-grid-line"/><text x="${left - 8}" y="${(lineY + 4).toFixed(1)}" text-anchor="end">${Math.round(value * 100)}%</text>`;
   }).join('');
   return `<svg viewBox="0 0 ${width} ${height}" role="img" aria-labelledby="retention-chart-title retention-chart-desc">
-    <title id="retention-chart-title">Audience retention for ${escapeHTML(snapshot.title || snapshot.videoId)}</title>
-    <desc id="retention-chart-desc">A ${points.length}-point audience retention curve divided by ${snapshot.sceneMetrics?.length || 0} production scenes.</desc>
+    <title id="retention-chart-title">Retenção do público em ${escapeHTML(snapshot.title || snapshot.videoId)}</title>
+    <desc id="retention-chart-desc">Curva de retenção com ${points.length} pontos, dividida em ${snapshot.sceneMetrics?.length || 0} cenas.</desc>
     ${sceneBands}${grid}
     <polyline points="${line}" class="retention-line"/>
-    <text x="${left}" y="${height - 10}" text-anchor="start">Start</text>
-    <text x="${width - right}" y="${height - 10}" text-anchor="end">End</text>
+    <text x="${left}" y="${height - 10}" text-anchor="start">Início</text>
+    <text x="${width - right}" y="${height - 10}" text-anchor="end">Fim</text>
   </svg>`;
 }
 
@@ -705,22 +727,22 @@ function renderActivation(activation = {}) {
   if (!container) return;
   const milestones = activation.milestones || {};
   const rows = [
-    ['Setup ready', milestones.setupReady],
-    ['First real MP4', milestones.firstRealVideo],
-    ['First approval', milestones.firstApproval],
-    ['First YouTube publish', milestones.firstPublish],
-    ['Second real MP4', milestones.secondRealVideo]
+    ['Configuração pronta', milestones.setupReady],
+    ['Primeiro MP4 real', milestones.firstRealVideo],
+    ['Primeira aprovação', milestones.firstApproval],
+    ['Primeira publicação no YouTube', milestones.firstPublish],
+    ['Segundo MP4 real', milestones.secondRealVideo]
   ];
   container.innerHTML = rows.map(([name, milestone = {}]) => `
     <div class="timeline-item">
       <div class="timeline-dot ${milestone.achieved ? 'done' : ''}"></div>
-      <div><strong>${escapeHTML(name)}</strong><div class="meta-line">${milestone.achieved ? escapeHTML(formatDate(milestone.at)) : 'Not reached yet'}</div></div>
+      <div><strong>${escapeHTML(name)}</strong><div class="meta-line">${milestone.achieved ? escapeHTML(formatDate(milestone.at)) : 'Ainda não alcançado'}</div></div>
     </div>`).join('');
   if (milestones.firstRealVideo?.achieved) {
     container.insertAdjacentHTML('beforeend', `
       <div class="activation-share">
-        <span>Made something real with Lumen?</span>
-        <a class="button secondary small" href="https://github.com/darkzOGx/youtube-automation-agent/discussions/new?category=show-and-tell" target="_blank" rel="noreferrer">Share what you built</a>
+        <span>Criou algo de verdade com o Lumen?</span>
+        <a class="button secondary small" href="https://github.com/darkzOGx/youtube-automation-agent/discussions/new?category=show-and-tell" target="_blank" rel="noreferrer">Compartilhe o que você fez</a>
       </div>`);
   }
 }
@@ -755,8 +777,8 @@ function renderOperator(strategy, runs, system) {
   const active = run && ['queued', 'running', 'cancelling'].includes(run.status);
   const recoverable = run && ['failed', 'interrupted', 'completed_with_issues'].includes(run.status);
   $('#activate-operator-button').disabled = Boolean(system.setupRequired || active || system.readiness?.status === 'failed');
-  $('#activate-operator-button').title = system.readiness?.status === 'failed' ? 'Resolve the production readiness failures first' : '';
-  $('#activate-operator-button').textContent = strategy?.status === 'active' ? 'Run strategy now' : 'Activate & run now';
+  $('#activate-operator-button').title = system.readiness?.status === 'failed' ? 'Resolva primeiro as falhas da verificação de prontidão' : '';
+  $('#activate-operator-button').textContent = strategy?.status === 'active' ? 'Rodar estratégia agora' : 'Ativar e rodar agora';
   $('#pause-operator-button').classList.toggle('hidden', strategy?.status !== 'active');
   $('#cancel-operator-run').classList.toggle('hidden', !active);
   if (active) $('#cancel-operator-run').dataset.runId = run.id;
@@ -765,20 +787,20 @@ function renderOperator(strategy, runs, system) {
   if (recoverable) $('#resume-operator-run').dataset.runId = run.id;
 
   if (!run) {
-    $('#operator-run-title').textContent = 'Waiting for a strategy';
-    $('#operator-run-summary').innerHTML = empty('Save a channel mandate, then activate it to research and produce the first plan.');
-    $('#operator-plan').innerHTML = empty('No editorial plan yet.');
+    $('#operator-run-title').textContent = 'Aguardando uma estratégia';
+    $('#operator-run-summary').innerHTML = empty('Salve uma missão para o canal e ative-a para pesquisar e produzir o primeiro plano.');
+    $('#operator-plan').innerHTML = empty('Nenhum plano editorial ainda.');
     return;
   }
 
   $('#operator-run-title').textContent = `${label(run.stage)} · ${run.progress || 0}%`;
-  const sources = Array.isArray(run.research?.sources) ? run.research.sources.join(', ') : 'Research pending';
+  const sources = Array.isArray(run.research?.sources) ? run.research.sources.join(', ') : 'Pesquisa pendente';
   $('#operator-run-summary').innerHTML = `<div class="run-summary">
     <div class="progress"><i style="width:${Math.max(0, Math.min(100, run.progress || 0))}%"></i></div>
     <div class="run-summary-row"><span>Status</span><strong>${statusChip(run.status)}</strong></div>
-    <div class="run-summary-row"><span>Research</span><strong>${escapeHTML(sources)}</strong></div>
-    <div class="run-summary-row"><span>Produced</span><strong>${escapeHTML(run.summary?.generated || 0)} / ${escapeHTML(run.summary?.planned || run.plan?.length || 0)}</strong></div>
-    <div class="run-summary-row"><span>Needs review</span><strong>${escapeHTML(run.summary?.needsReview || 0)}</strong></div>
+    <div class="run-summary-row"><span>Pesquisa</span><strong>${escapeHTML(sources)}</strong></div>
+    <div class="run-summary-row"><span>Produzidos</span><strong>${escapeHTML(run.summary?.generated || 0)} / ${escapeHTML(run.summary?.planned || run.plan?.length || 0)}</strong></div>
+    <div class="run-summary-row"><span>Aguardando revisão</span><strong>${escapeHTML(run.summary?.needsReview || 0)}</strong></div>
     ${run.error ? `<p class="callout">${escapeHTML(run.error)}</p>` : ''}
   </div>`;
   const plan = Array.isArray(run.plan) ? run.plan : [];
@@ -789,7 +811,7 @@ function renderOperator(strategy, runs, system) {
       <strong>${escapeHTML(item.topic)}</strong>
       <p>${escapeHTML(item.angle || item.rationale)}</p>
     </article>`;
-  }).join('') : empty('Research and planning will appear here when the run begins.');
+  }).join('') : empty('A pesquisa e o planejamento aparecem aqui quando a rodada começar.');
 }
 
 function populateSettings(profile = {}, settings = {}, providers = []) {
@@ -821,9 +843,9 @@ function populateSettings(profile = {}, settings = {}, providers = []) {
   }
   const selected = providers.find(provider => provider.id === videoMapping.videoProvider);
   $('#video-provider-status').textContent = videoMapping.videoProvider === 'auto'
-    ? `${providers.filter(provider => provider.available && provider.id !== 'slideshow').length} paid provider(s) available; local slideshow remains the final fallback.`
-    : videoMapping.videoProvider === 'slideshow' ? 'Local FFmpeg slideshow is selected; no external video credentials are required.'
-      : selected?.available ? `${label(selected.id)} is configured (${selected.model}).` : `${label(videoMapping.videoProvider)} credentials are not configured.`;
+    ? `${providers.filter(provider => provider.available && provider.id !== 'slideshow').length} provedor(es) pago(s) disponível(is); o slideshow local continua como última opção.`
+    : videoMapping.videoProvider === 'slideshow' ? 'Slideshow local (FFmpeg) selecionado: não precisa de credenciais de vídeo externas.'
+      : selected?.available ? `${label(selected.id)} está configurado (${selected.model}).` : `As credenciais de ${label(videoMapping.videoProvider)} não estão configuradas.`;
 }
 
 function switchView(view) {
@@ -831,14 +853,14 @@ function switchView(view) {
   $$('.nav-item').forEach(item => item.classList.toggle('active', item.dataset.view === view));
   $$('.view').forEach(item => item.classList.toggle('active', item.id === `${view}-view`));
   const titles = {
-    overview: ['OPERATOR OVERVIEW', 'Know what happens next.'],
-    operator: ['AUTONOMOUS OPERATOR', 'Give Lumen the strategy.'],
-    pipeline: ['CONTENT OPERATIONS', 'From idea to published.'],
-    calendar: ['EDITORIAL PLANNING', 'Plan before you generate.'],
-    analytics: ['PERFORMANCE', 'Turn results into the next move.'],
-    engagement: ['AUDIENCE ENGAGEMENT', 'Talk with the people watching.'],
-    readiness: ['PRODUCTION READINESS', 'Verify before autonomy runs.'],
-    settings: ['CHANNEL GUARDRAILS', 'Make every agent sound like you.']
+    overview: ['VISÃO GERAL DO OPERADOR', 'Saiba o que vem a seguir.'],
+    operator: ['OPERADOR AUTÔNOMO', 'Dê a estratégia ao Lumen.'],
+    pipeline: ['PRODUÇÃO DE CONTEÚDO', 'Da ideia à publicação.'],
+    calendar: ['PLANEJAMENTO EDITORIAL', 'Planeje antes de gerar.'],
+    analytics: ['DESEMPENHO', 'Transforme resultados no próximo passo.'],
+    engagement: ['ENGAJAMENTO DO PÚBLICO', 'Converse com quem assiste.'],
+    readiness: ['PRONTIDÃO DA PRODUÇÃO', 'Verifique antes de rodar no automático.'],
+    settings: ['REGRAS DO CANAL', 'Faça cada agente falar como você.']
   };
   $('#view-eyebrow').textContent = titles[view][0];
   $('#view-title').textContent = titles[view][1];
@@ -855,40 +877,40 @@ function selectOptions(options, selected) {
 
 function renderSourceEditor(source = {}, disabled = false) {
   return `<article class="provenance-item" data-provenance-source data-id="${escapeHTML(source.id || '')}" data-published-at="${escapeHTML(source.publishedAt || '')}" data-accessed-at="${escapeHTML(source.accessedAt || '')}">
-    <div class="provenance-item-heading"><strong>Research source</strong><button type="button" class="text-button danger-text" data-remove-provenance ${disabled ? 'disabled' : ''}>Remove</button></div>
+    <div class="provenance-item-heading"><strong>Fonte de pesquisa</strong><button type="button" class="text-button danger-text" data-remove-provenance ${disabled ? 'disabled' : ''}>Remover</button></div>
     <label><span>URL</span><input data-field="url" type="url" value="${escapeHTML(source.url || '')}" placeholder="https://..." required ${disabled ? 'disabled' : ''}></label>
     <div class="form-grid two">
-      <label><span>Title</span><input data-field="title" value="${escapeHTML(source.title || '')}" maxlength="300" ${disabled ? 'disabled' : ''}></label>
-      <label><span>Publisher</span><input data-field="publisher" value="${escapeHTML(source.publisher || '')}" maxlength="200" ${disabled ? 'disabled' : ''}></label>
-      <label><span>Type</span><select data-field="sourceType" ${disabled ? 'disabled' : ''}>${selectOptions([
-        ['official', 'Official source'], ['article', 'Article'], ['video', 'Video'], ['dataset', 'Dataset'], ['asset', 'Asset or license'], ['other', 'Other']
+      <label><span>Título</span><input data-field="title" value="${escapeHTML(source.title || '')}" maxlength="300" ${disabled ? 'disabled' : ''}></label>
+      <label><span>Publicado por</span><input data-field="publisher" value="${escapeHTML(source.publisher || '')}" maxlength="200" ${disabled ? 'disabled' : ''}></label>
+      <label><span>Tipo</span><select data-field="sourceType" ${disabled ? 'disabled' : ''}>${selectOptions([
+        ['official', 'Fonte oficial'], ['article', 'Artigo'], ['video', 'Vídeo'], ['dataset', 'Base de dados'], ['asset', 'Arquivo ou licença'], ['other', 'Outro']
       ], source.sourceType || 'other')}</select></label>
-      <label><span>Review status</span><select data-field="status" ${disabled ? 'disabled' : ''}>${selectOptions([
-        ['pending', 'Pending review'], ['verified', 'Verified'], ['rejected', 'Rejected']
+      <label><span>Situação da revisão</span><select data-field="status" ${disabled ? 'disabled' : ''}>${selectOptions([
+        ['pending', 'Revisão pendente'], ['verified', 'Verificada'], ['rejected', 'Rejeitada']
       ], source.status || 'pending')}</select></label>
     </div>
-    <label><span>Evidence notes</span><textarea data-field="notes" rows="2" maxlength="1000" ${disabled ? 'disabled' : ''}>${escapeHTML(source.notes || '')}</textarea></label>
-    ${source.url ? `<a class="source-link" href="${escapeHTML(source.url)}" target="_blank" rel="noopener">Open source ↗</a>` : ''}
+    <label><span>Anotações</span><textarea data-field="notes" rows="2" maxlength="1000" ${disabled ? 'disabled' : ''}>${escapeHTML(source.notes || '')}</textarea></label>
+    ${source.url ? `<a class="source-link" href="${escapeHTML(source.url)}" target="_blank" rel="noopener">Abrir fonte ↗</a>` : ''}
   </article>`;
 }
 
 function renderClaimEditor(claim = {}, sources = [], disabled = false) {
   const linked = new Set(claim.sourceIds || []);
   return `<article class="provenance-item ${claim.riskLevel === 'high' ? 'high-risk' : ''}" data-provenance-claim data-id="${escapeHTML(claim.id || '')}">
-    <div class="provenance-item-heading"><strong>Factual claim</strong><button type="button" class="text-button danger-text" data-remove-provenance ${disabled ? 'disabled' : ''}>Remove</button></div>
-    <label><span>Claim</span><textarea data-field="text" rows="3" maxlength="1000" required ${disabled ? 'disabled' : ''}>${escapeHTML(claim.text || '')}</textarea></label>
+    <div class="provenance-item-heading"><strong>Afirmação factual</strong><button type="button" class="text-button danger-text" data-remove-provenance ${disabled ? 'disabled' : ''}>Remover</button></div>
+    <label><span>Afirmação</span><textarea data-field="text" rows="3" maxlength="1000" required ${disabled ? 'disabled' : ''}>${escapeHTML(claim.text || '')}</textarea></label>
     <div class="form-grid two">
-      <label><span>Risk</span><select data-field="riskLevel" ${disabled ? 'disabled' : ''}>${selectOptions([
-        ['standard', 'Standard'], ['high', 'High risk']
+      <label><span>Risco</span><select data-field="riskLevel" ${disabled ? 'disabled' : ''}>${selectOptions([
+        ['standard', 'Normal'], ['high', 'Alto risco']
       ], claim.riskLevel || 'standard')}</select></label>
-      <label><span>Resolution</span><select data-field="status" ${disabled ? 'disabled' : ''}>${selectOptions([
-        ['pending', 'Pending'], ['supported', 'Supported'], ['unsupported', 'Unsupported'], ['waived', 'Waived with note']
+      <label><span>Conclusão</span><select data-field="status" ${disabled ? 'disabled' : ''}>${selectOptions([
+        ['pending', 'Pendente'], ['supported', 'Comprovada'], ['unsupported', 'Sem comprovação'], ['waived', 'Dispensada com nota']
       ], claim.status || 'pending')}</select></label>
     </div>
-    <fieldset class="source-checklist" ${disabled ? 'disabled' : ''}><legend>Supporting sources</legend>
-      ${sources.length ? sources.map(source => `<label><input type="checkbox" data-claim-source="${escapeHTML(source.id)}" ${linked.has(source.id) ? 'checked' : ''}> ${escapeHTML(source.title || source.url)}</label>`).join('') : '<small>Add a source before marking this claim supported.</small>'}
+    <fieldset class="source-checklist" ${disabled ? 'disabled' : ''}><legend>Fontes que comprovam</legend>
+      ${sources.length ? sources.map(source => `<label><input type="checkbox" data-claim-source="${escapeHTML(source.id)}" ${linked.has(source.id) ? 'checked' : ''}> ${escapeHTML(source.title || source.url)}</label>`).join('') : '<small>Adicione uma fonte antes de marcar esta afirmação como comprovada.</small>'}
     </fieldset>
-    <label><span>Reviewer notes</span><textarea data-field="notes" rows="2" maxlength="1000" placeholder="Required when waived" ${disabled ? 'disabled' : ''}>${escapeHTML(claim.notes || '')}</textarea></label>
+    <label><span>Notas do revisor</span><textarea data-field="notes" rows="2" maxlength="1000" placeholder="Obrigatório quando dispensada" ${disabled ? 'disabled' : ''}>${escapeHTML(claim.notes || '')}</textarea></label>
   </article>`;
 }
 
@@ -896,39 +918,39 @@ function renderProvenanceEditor(provenance = {}, canReview = true) {
   const sources = provenance.sources || [];
   const claims = provenance.claims || [];
   const summary = provenance.summary || {};
-  const statusLabel = provenance.status === 'verified' ? 'Evidence verified' : provenance.status === 'not_required' ? 'No claims declared' : `${summary.unresolvedClaims || 0} unresolved`;
+  const statusLabel = provenance.status === 'verified' ? 'Fontes verificadas' : provenance.status === 'not_required' ? 'Nenhuma afirmação declarada' : `${summary.unresolvedClaims || 0} pendentes`;
   return `<section class="provenance-panel">
-    <div class="panel-heading"><div><p class="eyebrow">RESEARCH &amp; PROVENANCE</p><h3>Evidence desk</h3><p>Verify sources, connect every factual claim, and record disclosure before approval.</p></div><span class="status ${provenance.status === 'verified' || provenance.status === 'not_required' ? 'success' : 'warning'}">${escapeHTML(statusLabel)}</span></div>
-    <div class="provenance-toolbar"><strong>Sources</strong>${canReview ? '<button type="button" class="text-button" data-add-provenance-source>Add source +</button>' : ''}</div>
-    <div id="provenance-sources" class="provenance-list">${sources.map(source => renderSourceEditor(source, !canReview)).join('') || '<p class="empty-inline">No research sources attached.</p>'}</div>
-    <div class="provenance-toolbar"><strong>Claims</strong>${canReview ? '<button type="button" class="text-button" data-add-provenance-claim>Add claim +</button>' : ''}</div>
-    <div id="provenance-claims" class="provenance-list">${claims.map(claim => renderClaimEditor(claim, sources, !canReview)).join('') || '<p class="empty-inline">No externally verifiable claims declared.</p>'}</div>
-    <label class="toggle disclosure-toggle"><input id="contains-synthetic-media" type="checkbox" ${provenance.containsSyntheticMedia ? 'checked' : ''} ${canReview ? '' : 'disabled'}><span></span> Contains realistic altered or synthetic media requiring YouTube disclosure</label>
-    ${canReview ? '<button type="button" class="button secondary" data-save-provenance>Save evidence review</button>' : ''}
+    <div class="panel-heading"><div><p class="eyebrow">PESQUISA E FONTES</p><h3>Checagem de fatos</h3><p>Verifique as fontes, ligue cada afirmação factual a elas e registre os avisos antes da aprovação.</p></div><span class="status ${provenance.status === 'verified' || provenance.status === 'not_required' ? 'success' : 'warning'}">${escapeHTML(statusLabel)}</span></div>
+    <div class="provenance-toolbar"><strong>Fontes</strong>${canReview ? '<button type="button" class="text-button" data-add-provenance-source>Adicionar fonte +</button>' : ''}</div>
+    <div id="provenance-sources" class="provenance-list">${sources.map(source => renderSourceEditor(source, !canReview)).join('') || '<p class="empty-inline">Nenhuma fonte de pesquisa anexada.</p>'}</div>
+    <div class="provenance-toolbar"><strong>Afirmações</strong>${canReview ? '<button type="button" class="text-button" data-add-provenance-claim>Adicionar afirmação +</button>' : ''}</div>
+    <div id="provenance-claims" class="provenance-list">${claims.map(claim => renderClaimEditor(claim, sources, !canReview)).join('') || '<p class="empty-inline">Nenhuma afirmação verificável declarada.</p>'}</div>
+    <label class="toggle disclosure-toggle"><input id="contains-synthetic-media" type="checkbox" ${provenance.containsSyntheticMedia ? 'checked' : ''} ${canReview ? '' : 'disabled'}><span></span> Contém mídia realista alterada ou sintética que exige aviso no YouTube</label>
+    ${canReview ? '<button type="button" class="button secondary" data-save-provenance>Salvar checagem</button>' : ''}
   </section>`;
 }
 
 function renderDiscoverabilityPanel(item) {
   const audit = item.discoverability;
   const findings = audit?.findings || [];
-  const state = !audit ? 'Not run' : audit.status === 'unavailable' ? 'Unavailable' : `${findings.length} finding${findings.length === 1 ? '' : 's'}`;
+  const state = !audit ? 'Não executada' : audit.status === 'unavailable' ? 'Indisponível' : `${findings.length} apontamento${findings.length === 1 ? '' : 's'}`;
   const stateClass = audit?.status === 'passed' || (audit && findings.length === 0) ? 'success' : 'warning';
   return `<section class="discoverability-panel">
     <div class="panel-heading discoverability-heading">
-      <div><p class="eyebrow">DISCOVERABILITY PREFLIGHT</p><h3>DarkzSEO review</h3><p>Review GEO, AIO, AEO, and web-search guidance against this content package. Findings are advisory and never rewrite or publish content.</p></div>
-      <div class="discoverability-actions"><span class="status ${stateClass}">${escapeHTML(state)}</span><button type="button" class="button secondary small" data-discoverability-run="${escapeHTML(item.id)}">${audit ? 'Run again' : 'Run audit'}</button></div>
+      <div><p class="eyebrow">CHECAGEM DE DESCOBERTA</p><h3>Revisão DarkzSEO</h3><p>Confere as orientações de busca (GEO, AIO, AEO e web) para este vídeo. Os apontamentos são só sugestões e nunca reescrevem nem publicam nada.</p></div>
+      <div class="discoverability-actions"><span class="status ${stateClass}">${escapeHTML(state)}</span><button type="button" class="button secondary small" data-discoverability-run="${escapeHTML(item.id)}">${audit ? 'Rodar de novo' : 'Rodar checagem'}</button></div>
     </div>
-    ${audit?.error ? `<p class="callout">DarkzSEO could not run${audit.errorCode || audit.error_code ? ` (${escapeHTML(audit.errorCode || audit.error_code)})` : ''}: ${escapeHTML(audit.error)}</p>` : ''}
+    ${audit?.error ? `<p class="callout">Não foi possível rodar o DarkzSEO${audit.errorCode || audit.error_code ? ` (${escapeHTML(audit.errorCode || audit.error_code)})` : ''}: ${escapeHTML(audit.error)}</p>` : ''}
     ${findings.length ? `<div class="discoverability-findings">${findings.map(finding => {
       const reviewStatus = finding.reviewStatus || finding.review_status || 'pending';
       return `<article class="discoverability-finding severity-${escapeHTML(String(finding.severity || 'info').toLowerCase())}" data-discoverability-finding="${escapeHTML(finding.id)}">
         <div class="discoverability-finding-heading"><span class="severity-badge">${escapeHTML(finding.severity)}</span><strong>${escapeHTML(finding.ruleId || finding.rule_id)}</strong><span class="review-state ${escapeHTML(reviewStatus)}">${escapeHTML(label(reviewStatus))}</span></div>
         <p>${escapeHTML(finding.message)}</p>
         ${finding.remediation ? `<small>${escapeHTML(finding.remediation)}</small>` : ''}
-        ${finding.reviewReason || finding.review_reason ? `<small>Reviewer note: ${escapeHTML(finding.reviewReason || finding.review_reason)}</small>` : ''}
-        <div class="discoverability-review-actions"><button type="button" class="text-button approve" data-discoverability-accept ${reviewStatus === 'accepted' ? 'disabled' : ''}>Keep as actionable</button><button type="button" class="text-button" data-discoverability-dismiss ${reviewStatus === 'dismissed' ? 'disabled' : ''}>Dismiss false positive</button></div>
+        ${finding.reviewReason || finding.review_reason ? `<small>Nota do revisor: ${escapeHTML(finding.reviewReason || finding.review_reason)}</small>` : ''}
+        <div class="discoverability-review-actions"><button type="button" class="text-button approve" data-discoverability-accept ${reviewStatus === 'accepted' ? 'disabled' : ''}>Manter como pendente</button><button type="button" class="text-button" data-discoverability-dismiss ${reviewStatus === 'dismissed' ? 'disabled' : ''}>Descartar falso positivo</button></div>
       </article>`;
-    }).join('')}</div>` : audit && audit.status !== 'unavailable' ? '<p class="empty-inline">No discoverability findings. The content package passed the configured advisory checks.</p>' : '<p class="empty-inline">Run DarkzSEO to create a versioned, reviewable audit for this production.</p>'}
+    }).join('')}</div>` : audit && audit.status !== 'unavailable' ? '<p class="empty-inline">Nenhum apontamento. O vídeo passou nas checagens configuradas.</p>' : '<p class="empty-inline">Rode o DarkzSEO para criar uma checagem revisável deste vídeo.</p>'}
   </section>`;
 }
 
@@ -941,18 +963,18 @@ function renderSceneEditor(item, canReview = true) {
   const narrationIssues = scenes.filter(scene => !['current', 'intentional_silence'].includes(scene.narrationStatus)).length;
   return `<section class="scene-repair-panel">
     <div class="panel-heading scene-heading">
-      <div><p class="eyebrow">SCENE REPAIR STUDIO</p><h3>Repair the timeline, not the whole video</h3><p>Edit, replace, or regenerate one scene. Changes remain draft-only until the timeline is rebuilt and approved.</p></div>
-      ${canReview ? `<button type="button" class="button primary small" data-rebuild-scenes="${escapeHTML(item.id)}">Rebuild final video</button>` : ''}
+      <div><p class="eyebrow">EDITOR DE CENAS</p><h3>Conserte a cena, não o vídeo inteiro</h3><p>Edite, substitua ou gere de novo uma cena. As mudanças ficam como rascunho até a linha do tempo ser remontada e aprovada.</p></div>
+      ${canReview ? `<button type="button" class="button primary small" data-rebuild-scenes="${escapeHTML(item.id)}">Remontar vídeo final</button>` : ''}
     </div>
     <div class="narration-recovery ${intentionalSilence ? 'intentional' : narrationIssues ? 'attention' : ''}">
-      <div><p class="eyebrow">NARRATION RELIABILITY</p><strong>${intentionalSilence ? 'Intentional silence confirmed' : narrationIssues ? `${narrationIssues} scene${narrationIssues === 1 ? '' : 's'} need narration` : 'Narration evidence is current'}</strong>
-      <p>${intentionalSilence ? escapeHTML(audio.silenceReason || '') : audio.error ? escapeHTML(audio.error) : 'Regenerate narration without replacing the scene visual. Approval remains blocked until audio is ready.'}</p>
-      ${audio.provider ? `<span class="narration-evidence">${escapeHTML(audio.provider)}${audio.model ? ` · ${escapeHTML(audio.model)}` : ''}${audio.externalTaskId ? ` · task ${escapeHTML(audio.externalTaskId)}` : ''}</span>` : ''}</div>
+      <div><p class="eyebrow">NARRAÇÃO</p><strong>${intentionalSilence ? 'Silêncio intencional confirmado' : narrationIssues ? `${narrationIssues} cena${narrationIssues === 1 ? '' : 's'} sem narração` : 'A narração está em dia'}</strong>
+      <p>${intentionalSilence ? escapeHTML(audio.silenceReason || '') : audio.error ? escapeHTML(audio.error) : 'Gere a narração de novo sem trocar o visual da cena. A aprovação fica bloqueada até o áudio ficar pronto.'}</p>
+      ${audio.provider ? `<span class="narration-evidence">${escapeHTML(audio.provider)}${audio.model ? ` · ${escapeHTML(audio.model)}` : ''}${audio.externalTaskId ? ` · tarefa ${escapeHTML(audio.externalTaskId)}` : ''}</span>` : ''}</div>
       ${canReview ? intentionalSilence
-        ? '<button type="button" class="button secondary small" data-require-narration>Require narration</button>'
-        : '<button type="button" class="button secondary small" data-intentional-silence>Use intentional silence</button>' : ''}
+        ? '<button type="button" class="button secondary small" data-require-narration>Exigir narração</button>'
+        : '<button type="button" class="button secondary small" data-intentional-silence>Usar silêncio intencional</button>' : ''}
     </div>
-    <div class="scene-summary"><strong>${scenes.length} scenes</strong><span>${Math.round(scenes.reduce((sum, scene) => sum + Number(scene.duration || 0), 0))}s timeline</span><span>${scenes.filter(scene => scene.status !== 'ready').length} pending repairs</span></div>
+    <div class="scene-summary"><strong>${scenes.length} cenas</strong><span>${Math.round(scenes.reduce((sum, scene) => sum + Number(scene.duration || 0), 0))} s de linha do tempo</span><span>${scenes.filter(scene => scene.status !== 'ready').length} consertos pendentes</span></div>
     <div class="scene-list">
       ${scenes.map((scene, index) => {
         const disabled = !canReview || scene.locked;
@@ -960,33 +982,33 @@ function renderSceneEditor(item, canReview = true) {
         const preview = scene.assetUrl
           ? scene.assetType === 'video'
             ? `<video controls preload="metadata"><source src="${escapeHTML(scene.assetUrl)}"></video>`
-            : `<img src="${escapeHTML(scene.assetUrl)}" alt="${escapeHTML(scene.label)} scene asset">`
-          : '<div class="preview-placeholder">No scene asset</div>';
+            : `<img src="${escapeHTML(scene.assetUrl)}" alt="${escapeHTML(scene.label)} - visual da cena">`
+          : '<div class="preview-placeholder">Cena sem visual</div>';
         return `<article class="scene-card ${scene.locked ? 'locked' : ''}" data-scene-card="${escapeHTML(scene.id)}">
           <div class="scene-card-top">
             <div class="scene-preview">${preview}<span class="scene-number">${index + 1}</span></div>
             <div class="scene-identity">
               <div class="scene-status-row">${statusChip(scene.status)} ${statusChip(`narration_${scene.narrationStatus || 'unavailable'}`)}<span>r${scene.revision}</span></div>
-              <label><span>Scene label</span><input data-scene-field="label" maxlength="120" value="${escapeHTML(scene.label)}" ${disabled ? 'disabled' : ''}></label>
-              <label><span>Duration</span><input data-scene-field="duration" type="number" min="2" max="600" step="0.5" value="${escapeHTML(scene.duration)}" ${disabled ? 'disabled' : ''}></label>
+              <label><span>Nome da cena</span><input data-scene-field="label" maxlength="120" value="${escapeHTML(scene.label)}" ${disabled ? 'disabled' : ''}></label>
+              <label><span>Duração</span><input data-scene-field="duration" type="number" min="2" max="600" step="0.5" value="${escapeHTML(scene.duration)}" ${disabled ? 'disabled' : ''}></label>
             </div>
           </div>
-          <label><span>Narration</span><textarea data-scene-field="scriptText" rows="4" maxlength="10000" ${disabled ? 'disabled' : ''}>${escapeHTML(scene.scriptText)}</textarea></label>
-          <label><span>Visual prompt</span><textarea data-scene-field="prompt" rows="3" maxlength="2000" ${disabled ? 'disabled' : ''}>${escapeHTML(scene.prompt)}</textarea></label>
-          ${verifiedSources.length ? `<fieldset class="source-checklist scene-sources" ${disabled ? 'disabled' : ''}><legend>Verified evidence linked to this narration</legend>${verifiedSources.map(source => `<label><input type="checkbox" data-scene-source value="${escapeHTML(source.id)}" ${sourceIds.has(source.id) ? 'checked' : ''}> ${escapeHTML(source.title)}</label>`).join('')}</fieldset>` : ''}
+          <label><span>Narração</span><textarea data-scene-field="scriptText" rows="4" maxlength="10000" ${disabled ? 'disabled' : ''}>${escapeHTML(scene.scriptText)}</textarea></label>
+          <label><span>Descrição do visual</span><textarea data-scene-field="prompt" rows="3" maxlength="2000" ${disabled ? 'disabled' : ''}>${escapeHTML(scene.prompt)}</textarea></label>
+          ${verifiedSources.length ? `<fieldset class="source-checklist scene-sources" ${disabled ? 'disabled' : ''}><legend>Fontes verificadas ligadas a esta narração</legend>${verifiedSources.map(source => `<label><input type="checkbox" data-scene-source value="${escapeHTML(source.id)}" ${sourceIds.has(source.id) ? 'checked' : ''}> ${escapeHTML(source.title)}</label>`).join('')}</fieldset>` : ''}
           <div class="scene-options">
-            <label class="toggle"><input type="checkbox" data-scene-factual checked ${disabled ? 'disabled' : ''}><span></span> Narration changes may contain factual claims</label>
+            <label class="toggle"><input type="checkbox" data-scene-factual checked ${disabled ? 'disabled' : ''}><span></span> As mudanças na narração podem ter afirmações factuais</label>
             <span>Visual: ${escapeHTML(scene.provider || 'local')} ${scene.model ? `· ${escapeHTML(scene.model)}` : ''}</span>
           </div>
-          <div class="scene-narration-evidence"><span>Narration: ${escapeHTML(scene.narrationProvider || 'not generated')}${scene.narrationModel ? ` · ${escapeHTML(scene.narrationModel)}` : ''}${scene.narrationTaskId ? ` · task ${escapeHTML(scene.narrationTaskId)}` : ''}</span>${scene.narrationError ? `<span class="danger-text">${escapeHTML(scene.narrationError)}</span>` : ''}</div>
+          <div class="scene-narration-evidence"><span>Narração: ${escapeHTML(scene.narrationProvider || 'não gerada')}${scene.narrationModel ? ` · ${escapeHTML(scene.narrationModel)}` : ''}${scene.narrationTaskId ? ` · tarefa ${escapeHTML(scene.narrationTaskId)}` : ''}</span>${scene.narrationError ? `<span class="danger-text">${escapeHTML(scene.narrationError)}</span>` : ''}</div>
           ${canReview ? `<div class="scene-actions">
-            <button type="button" class="text-button" data-scene-move="up" ${disabled || index === 0 ? 'disabled' : ''}>↑ Earlier</button>
-            <button type="button" class="text-button" data-scene-move="down" ${disabled || index === scenes.length - 1 ? 'disabled' : ''}>↓ Later</button>
-            <button type="button" class="text-button approve" data-scene-save ${disabled ? 'disabled' : ''}>Save scene</button>
-            <button type="button" class="text-button" data-scene-narration ${disabled ? 'disabled' : ''}>Regenerate narration only</button>
-            <button type="button" class="text-button" data-scene-regenerate ${disabled ? 'disabled' : ''}>Regenerate scene</button>
-            <label class="text-button upload-button ${disabled ? 'disabled' : ''}">Replace asset<input type="file" data-scene-upload accept="image/png,image/jpeg,image/webp,video/mp4" ${disabled ? 'disabled' : ''}></label>
-            <button type="button" class="text-button" data-scene-lock>${scene.locked ? 'Unlock' : 'Lock'}</button>
+            <button type="button" class="text-button" data-scene-move="up" ${disabled || index === 0 ? 'disabled' : ''}>↑ Antes</button>
+            <button type="button" class="text-button" data-scene-move="down" ${disabled || index === scenes.length - 1 ? 'disabled' : ''}>↓ Depois</button>
+            <button type="button" class="text-button approve" data-scene-save ${disabled ? 'disabled' : ''}>Salvar cena</button>
+            <button type="button" class="text-button" data-scene-narration ${disabled ? 'disabled' : ''}>Gerar só a narração de novo</button>
+            <button type="button" class="text-button" data-scene-regenerate ${disabled ? 'disabled' : ''}>Gerar cena de novo</button>
+            <label class="text-button upload-button ${disabled ? 'disabled' : ''}">Trocar visual<input type="file" data-scene-upload accept="image/png,image/jpeg,image/webp,video/mp4" ${disabled ? 'disabled' : ''}></label>
+            <button type="button" class="text-button" data-scene-lock>${scene.locked ? 'Destravar' : 'Travar'}</button>
           </div>` : ''}
         </article>`;
       }).join('')}
@@ -1000,13 +1022,13 @@ function renderShortsStudio(item) {
   const parentApproved = item.review_status === 'approved';
   return `<section class="shorts-studio">
     <div class="panel-heading shorts-heading">
-      <div><p class="eyebrow">SHORTS REPURPOSING STUDIO</p><h3>Turn one production into vertical reach</h3><p>Create local 9:16 excerpts with mobile captions. Drafts inherit the source production's evidence and still require separate approval.</p></div>
-      <button type="button" class="button secondary small" data-propose-shorts="${escapeHTML(item.id)}">${clips.length ? 'Refresh drafts' : 'Create 3 Short drafts'}</button>
+      <div><p class="eyebrow">ESTÚDIO DE SHORTS</p><h3>Transforme um vídeo em Shorts verticais</h3><p>Cria trechos 9:16 localmente, com legenda para celular. Os rascunhos herdam as fontes do vídeo original e precisam de aprovação própria.</p></div>
+      <button type="button" class="button secondary small" data-propose-shorts="${escapeHTML(item.id)}">${clips.length ? 'Atualizar rascunhos' : 'Criar 3 rascunhos de Short'}</button>
     </div>
     <div class="shorts-evidence ${parentApproved ? 'ready' : ''}">
-      <span>${parentApproved ? '✓ Source production approved' : 'Source approval required before scheduling'}</span>
-      <span>${escapeHTML(item.provenance?.status === 'verified' ? 'Evidence verified' : item.provenance?.status === 'not_required' ? 'No factual claims declared' : 'Evidence review incomplete')}</span>
-      <span>Local render · no new provider call</span>
+      <span>${parentApproved ? '✓ Vídeo original aprovado' : 'Aprove o vídeo original antes de agendar'}</span>
+      <span>${escapeHTML(item.provenance?.status === 'verified' ? 'Fontes verificadas' : item.provenance?.status === 'not_required' ? 'Nenhuma afirmação factual declarada' : 'Checagem de fontes incompleta')}</span>
+      <span>Renderização local · sem custo extra</span>
     </div>
     ${clips.length ? `<div class="shorts-grid">${clips.map(clip => {
       const locked = ['scheduled', 'uploading', 'published', 'reconciliation_required'].includes(clip.status);
@@ -1014,23 +1036,23 @@ function renderShortsStudio(item) {
       return `<article class="short-card" data-short-card="${escapeHTML(clip.id)}">
         <div class="short-preview">${rendered
           ? `<video controls preload="metadata"><source src="${escapeHTML(clip.assetUrls.video)}" type="video/mp4"></video>`
-          : `<div class="short-placeholder"><strong>9:16</strong><span>${escapeHTML(label(clip.layout))} layout</span></div>`}</div>
+          : `<div class="short-placeholder"><strong>9:16</strong><span>layout ${escapeHTML(label(clip.layout))}</span></div>`}</div>
         <div class="short-editor">
           <div class="scene-status-row">${statusChip(clip.status)}<span>${Number(clip.duration || 0).toFixed(0)}s</span><span>${escapeHTML((clip.sourceSceneLabels || []).join(' + '))}</span></div>
-          <label><span>Short title</span><input data-short-field="title" maxlength="100" value="${escapeHTML(clip.title)}" ${locked ? 'disabled' : ''}></label>
-          <label><span>Description and parent-video CTA</span><textarea data-short-field="description" rows="3" maxlength="5000" ${locked ? 'disabled' : ''}>${escapeHTML(clip.description)}</textarea></label>
+          <label><span>Título do Short</span><input data-short-field="title" maxlength="100" value="${escapeHTML(clip.title)}" ${locked ? 'disabled' : ''}></label>
+          <label><span>Descrição e chamada para o vídeo original</span><textarea data-short-field="description" rows="3" maxlength="5000" ${locked ? 'disabled' : ''}>${escapeHTML(clip.description)}</textarea></label>
           <label><span>Tags</span><input data-short-field="tags" value="${escapeHTML((clip.tags || []).join(', '))}" ${locked ? 'disabled' : ''}></label>
           <div class="form-grid two">
-            <label><span>Vertical layout</span><select data-short-field="layout" ${locked ? 'disabled' : ''}><option value="blur" ${clip.layout === 'blur' ? 'selected' : ''}>Blurred canvas</option><option value="crop" ${clip.layout === 'crop' ? 'selected' : ''}>Center crop</option><option value="stacked" ${clip.layout === 'stacked' ? 'selected' : ''}>Stacked focus</option></select></label>
-            <label><span>Publish time</span><input data-short-field="publishTime" type="datetime-local" value="${toLocalInput(clip.publishTime)}" ${locked ? 'disabled' : ''}></label>
-            <label><span>Privacy</span><select data-short-field="privacyStatus" ${locked ? 'disabled' : ''}><option value="private" ${clip.privacyStatus === 'private' ? 'selected' : ''}>Private</option><option value="unlisted" ${clip.privacyStatus === 'unlisted' ? 'selected' : ''}>Unlisted</option><option value="public" ${clip.privacyStatus === 'public' ? 'selected' : ''}>Public</option></select></label>
+            <label><span>Layout vertical</span><select data-short-field="layout" ${locked ? 'disabled' : ''}><option value="blur" ${clip.layout === 'blur' ? 'selected' : ''}>Fundo desfocado</option><option value="crop" ${clip.layout === 'crop' ? 'selected' : ''}>Corte central</option><option value="stacked" ${clip.layout === 'stacked' ? 'selected' : ''}>Foco empilhado</option></select></label>
+            <label><span>Horário de publicação</span><input data-short-field="publishTime" type="datetime-local" value="${toLocalInput(clip.publishTime)}" ${locked ? 'disabled' : ''}></label>
+            <label><span>Privacidade</span><select data-short-field="privacyStatus" ${locked ? 'disabled' : ''}><option value="private" ${clip.privacyStatus === 'private' ? 'selected' : ''}>Privado</option><option value="unlisted" ${clip.privacyStatus === 'unlisted' ? 'selected' : ''}>Não listado</option><option value="public" ${clip.privacyStatus === 'public' ? 'selected' : ''}>Público</option></select></label>
           </div>
           <p class="short-rationale">${escapeHTML(clip.rationale || '')}${clip.error ? `<br><span class="danger-text">${escapeHTML(clip.error)}</span>` : ''}</p>
-          ${clip.youtubeUrl ? `<a class="source-link" href="${escapeHTML(clip.youtubeUrl)}" target="_blank" rel="noopener">Open published Short ↗</a>` : ''}
-          ${!locked ? `<div class="short-actions"><button type="button" class="text-button" data-short-save>Save draft</button><button type="button" class="button secondary small" data-short-render>${rendered ? 'Render again' : 'Render 9:16'}</button><button type="button" class="button primary small" data-short-approve ${!parentApproved || clip.status !== 'rendered' ? 'disabled' : ''} title="${!parentApproved ? 'Approve the source production first' : clip.status !== 'rendered' ? 'Render this Short first' : 'Confirm and schedule this Short'}">Approve &amp; schedule</button></div>` : ''}
+          ${clip.youtubeUrl ? `<a class="source-link" href="${escapeHTML(clip.youtubeUrl)}" target="_blank" rel="noopener">Abrir Short publicado ↗</a>` : ''}
+          ${!locked ? `<div class="short-actions"><button type="button" class="text-button" data-short-save>Salvar rascunho</button><button type="button" class="button secondary small" data-short-render>${rendered ? 'Renderizar de novo' : 'Renderizar 9:16'}</button><button type="button" class="button primary small" data-short-approve ${!parentApproved || clip.status !== 'rendered' ? 'disabled' : ''} title="${!parentApproved ? 'Aprove o vídeo original primeiro' : clip.status !== 'rendered' ? 'Renderize este Short primeiro' : 'Confirmar e agendar este Short'}">Aprovar e agendar</button></div>` : ''}
         </div>
       </article>`;
-    }).join('')}</div>` : '<p class="empty-inline">No Short drafts yet. Create three candidates from the current scene timeline without calling a paid provider.</p>'}
+    }).join('')}</div>` : '<p class="empty-inline">Nenhum rascunho de Short ainda. Crie três opções a partir das cenas atuais, sem custo.</p>'}
   </section>`;
 }
 
@@ -1039,7 +1061,7 @@ async function openContent(productionId) {
   try {
     const item = await api(`/api/content/${encodeURIComponent(productionId)}`);
     const data = item.editorData || {};
-    const title = data.title || item.seo?.title || item.script?.title || item.strategy?.topic || 'Untitled content';
+    const title = data.title || item.seo?.title || item.script?.title || item.strategy?.topic || 'Conteúdo sem título';
     const description = data.description || item.seo?.description || '';
     const tags = data.tags || item.seo?.tags || [];
     const publishTime = item.schedule?.publish_time || data.publishTime || item.scheduled_publish_time;
@@ -1048,22 +1070,22 @@ async function openContent(productionId) {
     const selectedTitleVariant = Number(data.selectedTitleVariant || 0);
     const selectedThumbnailVariant = Number(data.selectedThumbnailVariant || 0);
     $('#content-detail').innerHTML = `
-      <div class="dialog-heading"><div><p class="eyebrow">CONTENT REVIEW</p><h2>${escapeHTML(title)}</h2><div class="meta-line">${statusChip(item.schedule?.status || item.review_status || item.status)} · Quality ${qualityScore(item.qualityChecks)}%</div></div><button type="button" class="close-button" data-close>×</button></div>
+      <div class="dialog-heading"><div><p class="eyebrow">REVISÃO DO CONTEÚDO</p><h2>${escapeHTML(title)}</h2><div class="meta-line">${statusChip(item.schedule?.status || item.review_status || item.status)} · Qualidade ${qualityScore(item.qualityChecks)}%</div></div><button type="button" class="close-button" data-close>×</button></div>
       <form id="content-review-form" class="editor content-review-editor">
         <div class="content-layout">
           <div>
-            <div class="preview">${item.assetUrls.video ? `<video controls preload="metadata" poster="${item.assetUrls.thumbnail || ''}"><source src="${item.assetUrls.video}" type="video/mp4"></video>` : item.assetUrls.thumbnail ? `<img src="${item.assetUrls.thumbnail}" alt="Generated thumbnail">` : '<div class="preview-placeholder">No playable preview was produced.</div>'}</div>
-            <div class="quality-grid">${(item.qualityChecks || []).map(check => `<div class="quality-check ${check.passed ? 'pass' : 'fail'}">${check.passed ? '✓' : '×'} ${escapeHTML(check.message)}</div>`).join('') || '<div class="quality-check">No quality results recorded.</div>'}</div>
+            <div class="preview">${item.assetUrls.video ? `<video controls preload="metadata" poster="${item.assetUrls.thumbnail || ''}"><source src="${item.assetUrls.video}" type="video/mp4"></video>` : item.assetUrls.thumbnail ? `<img src="${item.assetUrls.thumbnail}" alt="Thumbnail gerada">` : '<div class="preview-placeholder">Nenhuma prévia reproduzível foi gerada.</div>'}</div>
+            <div class="quality-grid">${(item.qualityChecks || []).map(check => `<div class="quality-check ${check.passed ? 'pass' : 'fail'}">${check.passed ? '✓' : '×'} ${escapeHTML(check.message)}</div>`).join('') || '<div class="quality-check">Nenhum resultado de qualidade registrado.</div>'}</div>
             ${item.review_notes ? `<p class="callout">${escapeHTML(item.review_notes)}</p>` : ''}
           </div>
           <div class="editor">
-            <label><span>Title</span><input name="title" maxlength="100" value="${escapeHTML(title)}" required></label>
-            <label><span>Description</span><textarea name="description" rows="7">${escapeHTML(description)}</textarea></label>
+            <label><span>Título</span><input name="title" maxlength="100" value="${escapeHTML(title)}" required></label>
+            <label><span>Descrição</span><textarea name="description" rows="7">${escapeHTML(description)}</textarea></label>
             <label><span>Tags</span><input name="tags" value="${escapeHTML(tags.join(', '))}"></label>
             ${experiment ? `<section class="experiment-panel">
-              <div><p class="eyebrow">APPROVED LEARNING EXPERIMENT</p><strong>${escapeHTML(experiment.hypothesis)}</strong><p>Choose the packaging to ship. Nothing changes on YouTube until this content is approved and published.</p></div>
-              <label><span>Title variant</span><select name="selectedTitleVariant">${experiment.titleVariants.map((variant, index) => `<option value="${index}" data-title="${escapeHTML(variant.title)}" ${index === selectedTitleVariant ? 'selected' : ''}>${escapeHTML(variant.label)} — ${escapeHTML(variant.title)}</option>`).join('')}</select></label>
-              <div class="experiment-thumbnails">${experiment.thumbnailVariants.map((variant, index) => `<label class="experiment-thumb ${index === selectedThumbnailVariant ? 'selected' : ''}"><input type="radio" name="selectedThumbnailVariant" value="${index}" ${index === selectedThumbnailVariant ? 'checked' : ''}><img src="${escapeHTML(item.assetUrls.experimentThumbnails?.[index] || '')}" alt="${escapeHTML(variant.label)} thumbnail variant"><span>${escapeHTML(variant.label)}</span></label>`).join('')}</div>
+              <div><p class="eyebrow">TESTE APROVADO</p><strong>${escapeHTML(experiment.hypothesis)}</strong><p>Escolha a combinação a usar. Nada muda no YouTube até este conteúdo ser aprovado e publicado.</p></div>
+              <label><span>Variação de título</span><select name="selectedTitleVariant">${experiment.titleVariants.map((variant, index) => `<option value="${index}" data-title="${escapeHTML(variant.title)}" ${index === selectedTitleVariant ? 'selected' : ''}>${escapeHTML(variant.label)} — ${escapeHTML(variant.title)}</option>`).join('')}</select></label>
+              <div class="experiment-thumbnails">${experiment.thumbnailVariants.map((variant, index) => `<label class="experiment-thumb ${index === selectedThumbnailVariant ? 'selected' : ''}"><input type="radio" name="selectedThumbnailVariant" value="${index}" ${index === selectedThumbnailVariant ? 'checked' : ''}><img src="${escapeHTML(item.assetUrls.experimentThumbnails?.[index] || '')}" alt="${escapeHTML(variant.label)} - variação de thumbnail"><span>${escapeHTML(variant.label)}</span></label>`).join('')}</div>
             </section>` : ''}
           </div>
         </div>
@@ -1072,15 +1094,15 @@ async function openContent(productionId) {
         ${renderDiscoverabilityPanel(item)}
         ${renderProvenanceEditor(item.provenance, canReview)}
           <div class="form-grid two">
-            <label><span>Publish time</span><input name="publishTime" type="datetime-local" value="${toLocalInput(publishTime)}"></label>
-            <label><span>Privacy</span><select name="privacyStatus"><option value="private" ${data.privacyStatus === 'private' ? 'selected' : ''}>Private</option><option value="unlisted" ${data.privacyStatus === 'unlisted' ? 'selected' : ''}>Unlisted</option><option value="public" ${data.privacyStatus === 'public' ? 'selected' : ''}>Public</option></select></label>
+            <label><span>Horário de publicação</span><input name="publishTime" type="datetime-local" value="${toLocalInput(publishTime)}"></label>
+            <label><span>Privacidade</span><select name="privacyStatus"><option value="private" ${data.privacyStatus === 'private' ? 'selected' : ''}>Privado</option><option value="unlisted" ${data.privacyStatus === 'unlisted' ? 'selected' : ''}>Não listado</option><option value="public" ${data.privacyStatus === 'public' ? 'selected' : ''}>Público</option></select></label>
           </div>
           <div class="settings-row">
-            <label class="toggle"><input name="factChecked" type="checkbox" ${data.factChecked ? 'checked' : ''}><span></span> Facts and claims reviewed</label>
-            <label class="toggle"><input name="rightsConfirmed" type="checkbox" ${data.rightsConfirmed ? 'checked' : ''}><span></span> Media rights confirmed</label>
+            <label class="toggle"><input name="factChecked" type="checkbox" ${data.factChecked ? 'checked' : ''}><span></span> Fatos e afirmações revisados</label>
+            <label class="toggle"><input name="rightsConfirmed" type="checkbox" ${data.rightsConfirmed ? 'checked' : ''}><span></span> Direitos de uso das mídias confirmados</label>
           </div>
-          ${item.schedule && !['published', 'uploading', 'uploaded', 'reconciliation_required'].includes(item.schedule.status) ? `<div class="form-actions"><button type="button" class="button secondary" data-reschedule-content="${escapeHTML(item.id)}">Reschedule</button><button type="button" class="button primary" data-publish-now-content="${escapeHTML(item.id)}">Publish now</button><button type="button" class="button danger" data-delete-schedule="${escapeHTML(item.id)}">Delete schedule</button></div>` : ''}
-          ${canReview ? `<div class="form-actions"><button type="button" class="button primary" data-approve-content="${escapeHTML(item.id)}">Approve & schedule</button><button type="button" class="button secondary" data-save-content="${escapeHTML(item.id)}">Save draft</button><button type="button" class="button danger" data-reject-content="${escapeHTML(item.id)}">Reject</button><button type="button" class="button ghost" data-retry-content="${escapeHTML(item.id)}">Regenerate</button></div>` : `<a class="button secondary" href="${escapeHTML(item.schedule?.youtube_url || '#')}" target="_blank" rel="noopener">Open on YouTube</a>`}
+          ${item.schedule && !['published', 'uploading', 'uploaded', 'reconciliation_required'].includes(item.schedule.status) ? `<div class="form-actions"><button type="button" class="button secondary" data-reschedule-content="${escapeHTML(item.id)}">Reagendar</button><button type="button" class="button primary" data-publish-now-content="${escapeHTML(item.id)}">Publicar agora</button><button type="button" class="button danger" data-delete-schedule="${escapeHTML(item.id)}">Excluir agendamento</button></div>` : ''}
+          ${canReview ? `<div class="form-actions"><button type="button" class="button primary" data-approve-content="${escapeHTML(item.id)}">Aprovar e agendar</button><button type="button" class="button secondary" data-save-content="${escapeHTML(item.id)}">Salvar rascunho</button><button type="button" class="button danger" data-reject-content="${escapeHTML(item.id)}">Rejeitar</button><button type="button" class="button ghost" data-retry-content="${escapeHTML(item.id)}">Gerar de novo</button></div>` : `<a class="button secondary" href="${escapeHTML(item.schedule?.youtube_url || '#')}" target="_blank" rel="noopener">Abrir no YouTube</a>`}
       </form>`;
     $('#content-review-form').dataset.productionId = item.id;
     $('#content-dialog').showModal();
@@ -1146,8 +1168,8 @@ async function refreshContentDialog(productionId, message) {
 }
 
 async function uploadSceneAsset(productionId, sceneId, file) {
-  if (!confirm('Confirm you own or have permission to use this replacement asset.')) return;
-  const synthetic = confirm('Does this replacement contain realistic altered or synthetic media that should be disclosed to YouTube?');
+  if (!confirm('Confirma que você é dono deste arquivo ou tem permissão para usá-lo?')) return;
+  const synthetic = confirm('Este arquivo tem mídia realista alterada ou sintética que precisa de aviso no YouTube?');
   $('#loading').classList.add('active');
   try {
     await api(`/api/content/${encodeURIComponent(productionId)}/scenes/${encodeURIComponent(sceneId)}/asset`, {
@@ -1160,7 +1182,7 @@ async function uploadSceneAsset(productionId, sceneId, file) {
         'x-synthetic-media': String(synthetic)
       }
     });
-    await refreshContentDialog(productionId, 'Scene asset replaced. Rebuild before approval.');
+    await refreshContentDialog(productionId, 'Visual da cena trocado. Remonte o vídeo antes de aprovar.');
   } catch (error) {
     showToast(error.message, 'error');
   } finally {
@@ -1203,7 +1225,7 @@ function clientId(prefix) {
 function currentSourceOptions() {
   return $$('[data-provenance-source]').map(item => ({
     id: item.dataset.id,
-    title: item.querySelector('[data-field="title"]').value || item.querySelector('[data-field="url"]').value || 'New source'
+    title: item.querySelector('[data-field="title"]').value || item.querySelector('[data-field="url"]').value || 'Nova fonte'
   }));
 }
 
@@ -1255,13 +1277,13 @@ document.addEventListener('click', async event => {
   if (open) return openContent(open.dataset.openContent);
 
   const cancel = event.target.closest('[data-cancel-job]');
-  if (cancel && confirm('Cancel this generation job after its current stage?')) {
-    await mutate(`/api/jobs/${encodeURIComponent(cancel.dataset.cancelJob)}/cancel`, 'POST', {}, 'Cancellation requested.').catch(() => {});
+  if (cancel && confirm('Cancelar esta geração depois da etapa atual?')) {
+    await mutate(`/api/jobs/${encodeURIComponent(cancel.dataset.cancelJob)}/cancel`, 'POST', {}, 'Cancelamento solicitado.').catch(() => {});
   }
 
   const idea = event.target.closest('[data-generate-idea]');
   if (idea) {
-    await mutate(`/api/ideas/${encodeURIComponent(idea.dataset.generateIdea)}/generate`, 'POST', { length: 'medium' }, 'Idea queued for generation.').catch(() => {});
+    await mutate(`/api/ideas/${encodeURIComponent(idea.dataset.generateIdea)}/generate`, 'POST', { length: 'medium' }, 'Ideia colocada na fila de geração.').catch(() => {});
   }
 
   const resume = event.target.closest('[data-resume-job]');
@@ -1269,8 +1291,8 @@ document.addEventListener('click', async event => {
     const jobId = resume.dataset.resumeJob;
     const select = $$('[data-resume-stage-for]').find(item => item.dataset.resumeStageFor === jobId);
     const stage = select?.value;
-    if (confirm(`Resume this job from ${label(stage)}? Later checkpoints will be regenerated.`)) {
-      await mutate(`/api/jobs/${encodeURIComponent(jobId)}/resume`, 'POST', { stage }, `Generation resumed from ${label(stage)}.`).catch(() => {});
+    if (confirm(`Retomar esta geração a partir de "${label(stage)}"? As etapas seguintes serão geradas de novo.`)) {
+      await mutate(`/api/jobs/${encodeURIComponent(jobId)}/resume`, 'POST', { stage }, `Geração retomada a partir de "${label(stage)}".`).catch(() => {});
     }
   }
 
@@ -1279,8 +1301,8 @@ document.addEventListener('click', async event => {
     const action = learning.dataset.learningAction;
     const id = learning.dataset.learningId;
     const message = action === 'approve'
-      ? 'Learning approved for future autonomous plans.'
-      : 'Learning rejected and excluded from future plans.';
+      ? 'Aprendizado aprovado para os próximos planos automáticos.'
+      : 'Aprendizado rejeitado e excluído dos próximos planos.';
     await mutate(`/api/learning/recommendations/${encodeURIComponent(id)}/${action}`, 'POST', {}, message).catch(() => {});
   }
 
@@ -1289,18 +1311,18 @@ document.addEventListener('click', async event => {
     const action = experiment.dataset.experimentAction;
     const id = experiment.dataset.experimentId;
     const prompts = {
-      approve: 'Approve this complete experiment plan? This does not change YouTube yet.',
-      start: 'Start this live test? Lumen will rotate only the approved arms and restore the control before asking you to adopt a winner.',
-      adopt: 'Adopt the evidence-backed winner on YouTube and approve its learning for future plans?',
-      cancel: 'Cancel this experiment and restore the control title and thumbnail?'
+      approve: 'Aprovar este plano de teste completo? Isso ainda não muda nada no YouTube.',
+      start: 'Começar este teste real? O Lumen vai alternar só as variações aprovadas e restaurar o original antes de pedir para você escolher a vencedora.',
+      adopt: 'Adotar no YouTube a variação vencedora e aprovar o aprendizado para os próximos planos?',
+      cancel: 'Cancelar este teste e restaurar o título e a thumbnail originais?'
     };
     if (prompts[action] && !confirm(prompts[action])) return;
     const messages = {
-      approve: 'Experiment plan approved.',
-      start: 'Controlled experiment started.',
-      refresh: 'Experiment evidence refreshed.',
-      adopt: 'Winner adopted and approved for future planning.',
-      cancel: 'Experiment cancelled and control restored.'
+      approve: 'Plano de teste aprovado.',
+      start: 'Teste iniciado.',
+      refresh: 'Dados do teste atualizados.',
+      adopt: 'Vencedora adotada e aprovada para os próximos planos.',
+      cancel: 'Teste cancelado e original restaurado.'
     };
     await mutate(`/api/experiments/${encodeURIComponent(id)}/${action}`, 'POST', prompts[action] ? { confirmed: true } : {}, messages[action]).catch(() => {});
   }
@@ -1313,7 +1335,7 @@ document.addEventListener('click', async event => {
         method: 'POST',
         body: JSON.stringify({ measurementWindow: refreshRetention.dataset.measurementWindow || 'rolling' })
       });
-      showToast('Retention curve refreshed from YouTube Analytics.');
+      showToast('Curva de retenção atualizada pelo YouTube Analytics.');
       await refreshDashboard(true);
     } catch (error) {
       showToast(error.message, 'error');
@@ -1326,7 +1348,7 @@ document.addEventListener('click', async event => {
   if (syncEngagement?.dataset.videoId) {
     syncEngagement.disabled = true;
     try {
-      await mutate(`/api/engagement/${encodeURIComponent(syncEngagement.dataset.videoId)}/sync`, 'POST', { analyze: true }, 'Comments synced from YouTube.');
+      await mutate(`/api/engagement/${encodeURIComponent(syncEngagement.dataset.videoId)}/sync`, 'POST', { analyze: true }, 'Comentários sincronizados do YouTube.');
       ui.engagementDetail = null;
       renderEngagement(ui.state?.engagement || {});
     } catch (_error) { /* toast shown */ } finally {
@@ -1338,7 +1360,7 @@ document.addEventListener('click', async event => {
   if (draftEngagement?.dataset.videoId) {
     draftEngagement.disabled = true;
     try {
-      await mutate(`/api/engagement/${encodeURIComponent(draftEngagement.dataset.videoId)}/draft-replies`, 'POST', {}, 'Reply drafts created for review.');
+      await mutate(`/api/engagement/${encodeURIComponent(draftEngagement.dataset.videoId)}/draft-replies`, 'POST', {}, 'Rascunhos de resposta criados para revisão.');
       ui.engagementDetail = null;
       renderEngagement(ui.state?.engagement || {});
     } catch (_error) { /* toast shown */ } finally {
@@ -1350,14 +1372,14 @@ document.addEventListener('click', async event => {
   if (replySave) {
     const card = replySave.closest('[data-reply-card]');
     const text = card?.querySelector('[data-reply-text]')?.value || '';
-    await mutate(`/api/engagement/replies/${encodeURIComponent(replySave.dataset.replySave)}`, 'PATCH', { editedText: text }, 'Reply draft updated.').catch(() => {});
+    await mutate(`/api/engagement/replies/${encodeURIComponent(replySave.dataset.replySave)}`, 'PATCH', { editedText: text }, 'Rascunho de resposta atualizado.').catch(() => {});
     ui.engagementDetail = null;
     renderEngagement(ui.state?.engagement || {});
   }
 
   const replyDiscard = event.target.closest('[data-reply-discard]');
   if (replyDiscard) {
-    await mutate(`/api/engagement/replies/${encodeURIComponent(replyDiscard.dataset.replyDiscard)}`, 'PATCH', { discard: true }, 'Reply draft discarded.').catch(() => {});
+    await mutate(`/api/engagement/replies/${encodeURIComponent(replyDiscard.dataset.replyDiscard)}`, 'PATCH', { discard: true }, 'Rascunho de resposta descartado.').catch(() => {});
     ui.engagementDetail = null;
     renderEngagement(ui.state?.engagement || {});
   }
@@ -1366,9 +1388,9 @@ document.addEventListener('click', async event => {
   if (replyApprove) {
     const card = replyApprove.closest('[data-reply-card]');
     const text = card?.querySelector('[data-reply-text]')?.value || '';
-    if (!text.trim()) return showToast('Reply text is empty.', 'error');
-    if (confirm(`Post this reply to YouTube?\n\n${text}`)) {
-      await mutate(`/api/engagement/replies/${encodeURIComponent(replyApprove.dataset.replyApprove)}/approve`, 'POST', { confirmed: true, editedText: text }, 'Reply posted to YouTube.').catch(() => {});
+    if (!text.trim()) return showToast('O texto da resposta está vazio.', 'error');
+    if (confirm(`Publicar esta resposta no YouTube?\n\n${text}`)) {
+      await mutate(`/api/engagement/replies/${encodeURIComponent(replyApprove.dataset.replyApprove)}/approve`, 'POST', { confirmed: true, editedText: text }, 'Resposta publicada no YouTube.').catch(() => {});
       ui.engagementDetail = null;
       renderEngagement(ui.state?.engagement || {});
     }
@@ -1378,12 +1400,12 @@ document.addEventListener('click', async event => {
   if (proposeShorts) {
     const productionId = proposeShorts.dataset.proposeShorts;
     const replacing = Boolean(document.querySelector('[data-short-card]'));
-    if (replacing && !confirm('Replace the current editable Short drafts? Rendered draft files will remain on disk but their manifest will be replaced.')) return;
+    if (replacing && !confirm('Substituir os rascunhos atuais de Short? Os arquivos já renderizados continuam no disco, mas a lista será substituída.')) return;
     try {
       await api(`/api/content/${encodeURIComponent(productionId)}/shorts/propose`, {
         method: 'POST', body: JSON.stringify({ count: 3, replace: replacing })
       });
-      await refreshContentDialog(productionId, 'Three local Short drafts created from the current scene timeline.');
+      await refreshContentDialog(productionId, 'Três rascunhos de Short criados a partir das cenas atuais.');
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -1397,7 +1419,7 @@ document.addEventListener('click', async event => {
       await api(`/api/content/${encodeURIComponent(productionId)}/discoverability/run`, {
         method: 'POST', body: JSON.stringify({ platform: 'youtube' })
       });
-      await refreshContentDialog(productionId, 'Discoverability preflight refreshed. Findings remain advisory until reviewed.');
+      await refreshContentDialog(productionId, 'Checagem de descoberta atualizada. Os apontamentos são só sugestões até serem revisados.');
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -1411,14 +1433,14 @@ document.addEventListener('click', async event => {
     if (!card || !productionId) return;
     const status = discoverabilityReview.matches('[data-discoverability-dismiss]') ? 'dismissed' : 'accepted';
     const reason = status === 'dismissed'
-      ? (prompt('Why is this finding a false positive? The reason will be retained on future matching audits.') || '')
+      ? (prompt('Por que este apontamento é um falso positivo? O motivo fica salvo para as próximas checagens.') || '')
       : '';
     if (status === 'dismissed' && !reason) return;
     try {
       await api(`/api/discoverability/findings/${encodeURIComponent(card.dataset.discoverabilityFinding)}`, {
         method: 'PATCH', body: JSON.stringify({ status, reason })
       });
-      await refreshContentDialog(productionId, status === 'dismissed' ? 'Finding dismissed with reviewer evidence.' : 'Finding kept as an actionable recommendation.');
+      await refreshContentDialog(productionId, status === 'dismissed' ? 'Apontamento descartado com a justificativa do revisor.' : 'Apontamento mantido como pendente.');
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -1437,21 +1459,21 @@ document.addEventListener('click', async event => {
         method: 'PATCH', body: JSON.stringify(values)
       });
       if (shortAction.matches('[data-short-save]')) {
-        await refreshContentDialog(productionId, 'Short draft saved.');
+        await refreshContentDialog(productionId, 'Rascunho do Short salvo.');
         return;
       }
       if (shortAction.matches('[data-short-render]')) {
         await api(`/api/content/${encodeURIComponent(productionId)}/shorts/${encodeURIComponent(clipId)}/render`, {
           method: 'POST', body: '{}'
         });
-        await refreshContentDialog(productionId, 'Vertical Short rendered locally with mobile captions.');
+        await refreshContentDialog(productionId, 'Short vertical renderizado localmente, com legenda para celular.');
         return;
       }
-      if (!confirm('Confirm the inherited evidence, media rights, privacy, and publish time for this Short?')) return;
+      if (!confirm('Confirma as fontes herdadas, os direitos de uso, a privacidade e o horário de publicação deste Short?')) return;
       await api(`/api/content/${encodeURIComponent(productionId)}/shorts/${encodeURIComponent(clipId)}/approve`, {
         method: 'POST', body: JSON.stringify({ ...values, confirmed: true })
       });
-      await refreshContentDialog(productionId, 'Short approved and added to the publishing schedule.');
+      await refreshContentDialog(productionId, 'Short aprovado e adicionado ao calendário de publicação.');
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -1469,7 +1491,7 @@ document.addEventListener('click', async event => {
         await api(`/api/content/${encodeURIComponent(productionId)}/scenes/${encodeURIComponent(sceneId)}`, {
           method: 'PATCH', body: JSON.stringify({ locked: !card.classList.contains('locked') })
         });
-        await refreshContentDialog(productionId, card.classList.contains('locked') ? 'Scene unlocked.' : 'Scene locked.');
+        await refreshContentDialog(productionId, card.classList.contains('locked') ? 'Cena destravada.' : 'Cena travada.');
         return;
       }
       if (sceneButton.matches('[data-scene-move]')) {
@@ -1482,33 +1504,33 @@ document.addEventListener('click', async event => {
         await api(`/api/content/${encodeURIComponent(productionId)}/scenes/reorder`, {
           method: 'POST', body: JSON.stringify({ sceneIds: ids })
         });
-        await refreshContentDialog(productionId, 'Timeline order updated. Rebuild before approval.');
+        await refreshContentDialog(productionId, 'Ordem das cenas atualizada. Remonte o vídeo antes de aprovar.');
         return;
       }
       await api(`/api/content/${encodeURIComponent(productionId)}/scenes/${encodeURIComponent(sceneId)}`, {
         method: 'PATCH', body: JSON.stringify(sceneFormData(card))
       });
       if (sceneButton.matches('[data-scene-save]')) {
-        await refreshContentDialog(productionId, 'Scene draft saved.');
+        await refreshContentDialog(productionId, 'Rascunho da cena salvo.');
         return;
       }
       if (sceneButton.matches('[data-scene-narration]')) {
-        if (!confirm('Regenerate narration for only this scene? This may consume TTS provider credits; the provider invoice is authoritative.')) return;
+        if (!confirm('Gerar de novo a narração só desta cena? Isso pode consumir créditos do provedor de voz; vale o que constar na fatura do provedor.')) return;
         await api(`/api/content/${encodeURIComponent(productionId)}/scenes/${encodeURIComponent(sceneId)}/narration`, {
           method: 'POST', body: JSON.stringify({ confirmCost: true })
         });
-        await refreshContentDialog(productionId, 'Scene narration regenerated. Rebuild the final video when every narration segment is ready.');
+        await refreshContentDialog(productionId, 'Narração da cena gerada de novo. Remonte o vídeo final quando todas as narrações estiverem prontas.');
         return;
       }
       const estimate = await api(`/api/content/${encodeURIComponent(productionId)}/scenes/${encodeURIComponent(sceneId)}/estimate`);
       const message = estimate.paid
-        ? `Regenerate only this scene with ${estimate.provider} (${estimate.generatedSeconds}s). This consumes provider credits; the provider invoice is authoritative. Continue?`
-        : 'Regenerate only this scene with the configured image provider? A live image request may consume provider credits. Continue?';
+        ? `Gerar de novo só esta cena com ${estimate.provider} (${estimate.generatedSeconds} s)? Isso consome créditos do provedor; vale o que constar na fatura do provedor. Continuar?`
+        : 'Gerar de novo só esta cena com o provedor de imagem configurado? Um pedido real de imagem pode consumir créditos. Continuar?';
       if (!confirm(message)) return;
       await api(`/api/content/${encodeURIComponent(productionId)}/scenes/${encodeURIComponent(sceneId)}/regenerate`, {
         method: 'POST', body: JSON.stringify({ confirmPaid: estimate.paid })
       });
-      await refreshContentDialog(productionId, 'Scene regenerated. Rebuild the final video when the timeline is ready.');
+      await refreshContentDialog(productionId, 'Cena gerada de novo. Remonte o vídeo final quando a linha do tempo estiver pronta.');
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -1522,17 +1544,17 @@ document.addEventListener('click', async event => {
     const enabled = silenceAction.matches('[data-intentional-silence]');
     let reason = '';
     if (enabled) {
-      reason = prompt('Why is this production intentionally silent? This reason is stored with the approval evidence.') || '';
+      reason = prompt('Por que este vídeo é intencionalmente sem narração? O motivo fica salvo junto com a aprovação.') || '';
       if (!reason) return;
-      if (!confirm('Confirm that this production is intentionally silent. Captions and visuals will remain, and approval will record this override.')) return;
-    } else if (!confirm('Require narration again? Approval will be blocked until missing scene narration is regenerated and the video is rebuilt.')) {
+      if (!confirm('Confirma que este vídeo é intencionalmente sem narração? Legendas e visuais continuam, e a aprovação registra esta exceção.')) return;
+    } else if (!confirm('Exigir narração de novo? A aprovação fica bloqueada até as narrações que faltam serem geradas e o vídeo ser remontado.')) {
       return;
     }
     try {
       await api(`/api/content/${encodeURIComponent(productionId)}/narration/silence`, {
         method: 'POST', body: JSON.stringify({ enabled, confirmed: enabled, reason })
       });
-      await refreshContentDialog(productionId, enabled ? 'Intentional silence recorded. Rebuild before approval.' : 'Narration is required again.');
+      await refreshContentDialog(productionId, enabled ? 'Silêncio intencional registrado. Remonte o vídeo antes de aprovar.' : 'A narração voltou a ser obrigatória.');
     } catch (error) {
       showToast(error.message, 'error');
     }
@@ -1542,10 +1564,10 @@ document.addEventListener('click', async event => {
   const rebuildScenes = event.target.closest('[data-rebuild-scenes]');
   if (rebuildScenes) {
     const productionId = rebuildScenes.dataset.rebuildScenes;
-    if (confirm('Rebuild a new final MP4 from the current scene timeline? The previous final video will be preserved.')) {
+    if (confirm('Montar um novo MP4 final a partir das cenas atuais? O vídeo final anterior será mantido.')) {
       try {
         await api(`/api/content/${encodeURIComponent(productionId)}/scenes/rebuild`, { method: 'POST', body: '{}' });
-        await refreshContentDialog(productionId, 'Final video rebuilt from the repaired timeline. Review it before approval.');
+        await refreshContentDialog(productionId, 'Vídeo final remontado a partir das cenas corrigidas. Revise antes de aprovar.');
       } catch (error) {
         showToast(error.message, 'error');
       }
@@ -1578,7 +1600,7 @@ document.addEventListener('click', async event => {
   const saveProvenance = event.target.closest('[data-save-provenance]');
   if (saveProvenance) {
     const productionId = $('#content-review-form')?.dataset.productionId;
-    if (productionId) await persistProvenance(productionId, 'Evidence review saved.').catch(() => {});
+    if (productionId) await persistProvenance(productionId, 'Checagem salva.').catch(() => {});
     return;
   }
 
@@ -1586,7 +1608,7 @@ document.addEventListener('click', async event => {
   if (save) {
     try {
       await persistProvenance(save.dataset.saveContent);
-      await mutate(`/api/content/${encodeURIComponent(save.dataset.saveContent)}`, 'PATCH', contentFormData(), 'Draft and evidence review saved.');
+      await mutate(`/api/content/${encodeURIComponent(save.dataset.saveContent)}`, 'PATCH', contentFormData(), 'Rascunho e checagem salvos.');
     } catch (_error) { /* toast already shown */ }
   }
 
@@ -1594,7 +1616,7 @@ document.addEventListener('click', async event => {
   if (approve) {
     try {
       await persistProvenance(approve.dataset.approveContent);
-      await mutate(`/api/content/${encodeURIComponent(approve.dataset.approveContent)}/approve`, 'POST', contentFormData(), 'Content approved and scheduled.');
+      await mutate(`/api/content/${encodeURIComponent(approve.dataset.approveContent)}/approve`, 'POST', contentFormData(), 'Conteúdo aprovado e agendado.');
       $('#content-dialog').close();
     } catch (_error) { /* toast already shown */ }
   }
@@ -1602,9 +1624,9 @@ document.addEventListener('click', async event => {
   const reschedule = event.target.closest('[data-reschedule-content]');
   if (reschedule) {
     const publishTime = contentFormData().publishTime;
-    if (!publishTime) return showToast('Choose a future publish time first.', 'error');
+    if (!publishTime) return showToast('Escolha primeiro um horário de publicação no futuro.', 'error');
     try {
-      await mutate(`/api/content/${encodeURIComponent(reschedule.dataset.rescheduleContent)}/schedule`, 'PATCH', { publishTime }, 'Content rescheduled.');
+      await mutate(`/api/content/${encodeURIComponent(reschedule.dataset.rescheduleContent)}/schedule`, 'PATCH', { publishTime }, 'Conteúdo reagendado.');
       await openContent(reschedule.dataset.rescheduleContent);
     } catch (_error) { /* toast already shown */ }
     return;
@@ -1612,9 +1634,9 @@ document.addEventListener('click', async event => {
 
   const publishNow = event.target.closest('[data-publish-now-content]');
   if (publishNow) {
-    if (!confirm('Publish this video to YouTube now using the selected privacy setting?')) return;
+    if (!confirm('Publicar este vídeo no YouTube agora, com a privacidade escolhida?')) return;
     try {
-      await mutate(`/api/content/${encodeURIComponent(publishNow.dataset.publishNowContent)}/publish-now`, 'POST', {}, 'Content published.');
+      await mutate(`/api/content/${encodeURIComponent(publishNow.dataset.publishNowContent)}/publish-now`, 'POST', {}, 'Conteúdo publicado.');
       $('#content-dialog').close();
     } catch (_error) { /* toast already shown */ }
     return;
@@ -1622,9 +1644,9 @@ document.addEventListener('click', async event => {
 
   const deleteSchedule = event.target.closest('[data-delete-schedule]');
   if (deleteSchedule) {
-    if (!confirm('Delete this schedule entry? The generated content and assets will be kept.')) return;
+    if (!confirm('Excluir este agendamento? O conteúdo e os arquivos gerados serão mantidos.')) return;
     try {
-      await mutate(`/api/content/${encodeURIComponent(deleteSchedule.dataset.deleteSchedule)}/schedule`, 'DELETE', undefined, 'Schedule deleted; generated content was kept.');
+      await mutate(`/api/content/${encodeURIComponent(deleteSchedule.dataset.deleteSchedule)}/schedule`, 'DELETE', undefined, 'Agendamento excluído; o conteúdo gerado foi mantido.');
       await openContent(deleteSchedule.dataset.deleteSchedule);
     } catch (_error) { /* toast already shown */ }
     return;
@@ -1632,16 +1654,16 @@ document.addEventListener('click', async event => {
 
   const reject = event.target.closest('[data-reject-content]');
   if (reject) {
-    const notes = prompt('Why are you rejecting this content?', 'Needs a different angle');
+    const notes = prompt('Por que você está rejeitando este conteúdo?', 'Precisa de outro ângulo');
     if (notes !== null) {
-      await mutate(`/api/content/${encodeURIComponent(reject.dataset.rejectContent)}/reject`, 'POST', { notes }, 'Content rejected.').catch(() => {});
+      await mutate(`/api/content/${encodeURIComponent(reject.dataset.rejectContent)}/reject`, 'POST', { notes }, 'Conteúdo rejeitado.').catch(() => {});
       $('#content-dialog').close();
     }
   }
 
   const retry = event.target.closest('[data-retry-content]');
-  if (retry && confirm('Generate a fresh version using the same topic?')) {
-    await mutate(`/api/content/${encodeURIComponent(retry.dataset.retryContent)}/retry`, 'POST', {}, 'Regeneration started.').catch(() => {});
+  if (retry && confirm('Gerar uma nova versão com o mesmo tema?')) {
+    await mutate(`/api/content/${encodeURIComponent(retry.dataset.retryContent)}/retry`, 'POST', {}, 'Nova geração iniciada.').catch(() => {});
     $('#content-dialog').close();
   }
 });
@@ -1684,29 +1706,29 @@ $('#experiment-create-form').addEventListener('submit', async event => {
     productionId: values.productionId,
     armDurationHours: Number(values.armDurationHours),
     minImpressions: Number(values.minImpressions)
-  }, 'Draft growth experiment created for review.').catch(() => {});
+  }, 'Rascunho de teste de crescimento criado para revisão.').catch(() => {});
 });
 
 $('#run-readiness-button').addEventListener('click', async event => {
   const button = event.currentTarget;
   button.disabled = true;
-  button.textContent = 'Running live checks…';
+  button.textContent = 'Rodando verificações…';
   try {
     await mutate('/api/readiness/run', 'POST', {
       includePaidMedia: $('#paid-image-probe').checked,
       includePaidVideo: $('#paid-video-probe').checked
-    }, 'Production readiness check completed.');
+    }, 'Verificação de prontidão concluída.');
     switchView('readiness');
   } catch (_error) { /* toast already shown */ }
   finally {
     button.disabled = false;
-    button.textContent = 'Run verified check';
+    button.textContent = 'Rodar verificação';
   }
 });
 
 $('#automation-toggle').addEventListener('click', async () => {
   const action = ui.state?.system.automationPaused ? 'resume' : 'pause';
-  await mutate(`/api/automation/${action}`, 'POST', {}, `Automation ${action}d.`).catch(() => {});
+  await mutate(`/api/automation/${action}`, 'POST', {}, action === 'pause' ? 'Automação pausada.' : 'Automação retomada.').catch(() => {});
 });
 
 function strategyFormData(status = ui.state?.channelStrategy?.status || 'draft') {
@@ -1726,29 +1748,29 @@ function strategyFormData(status = ui.state?.channelStrategy?.status || 'draft')
 
 $('#strategy-form').addEventListener('submit', async event => {
   event.preventDefault();
-  await mutate('/api/operator/strategy', 'PUT', strategyFormData(), 'Channel strategy saved.').catch(() => {});
+  await mutate('/api/operator/strategy', 'PUT', strategyFormData(), 'Estratégia do canal salva.').catch(() => {});
 });
 
 $('#activate-operator-button').addEventListener('click', async () => {
   if (!$('#strategy-form').reportValidity()) return;
-  await mutate('/api/operator/start', 'POST', strategyFormData('active'), 'Autonomous operator started.').catch(() => {});
+  await mutate('/api/operator/start', 'POST', strategyFormData('active'), 'Operador autônomo iniciado.').catch(() => {});
 });
 
 $('#pause-operator-button').addEventListener('click', async () => {
-  await mutate('/api/operator/pause', 'POST', {}, 'Autonomous operator paused.').catch(() => {});
+  await mutate('/api/operator/pause', 'POST', {}, 'Operador autônomo pausado.').catch(() => {});
 });
 
 $('#cancel-operator-run').addEventListener('click', async event => {
   const runId = event.currentTarget.dataset.runId;
-  if (runId && confirm('Stop this autonomous run after the current agent stage?')) {
-    await mutate(`/api/operator/runs/${encodeURIComponent(runId)}/cancel`, 'POST', {}, 'Operator stop requested.').catch(() => {});
+  if (runId && confirm('Parar esta rodada automática depois da etapa atual?')) {
+    await mutate(`/api/operator/runs/${encodeURIComponent(runId)}/cancel`, 'POST', {}, 'Parada do operador solicitada.').catch(() => {});
   }
 });
 
 $('#resume-operator-run').addEventListener('click', async event => {
   const runId = event.currentTarget.dataset.runId;
-  if (runId && confirm('Resume this operator run from its saved editorial plan and generation checkpoints?')) {
-    await mutate(`/api/operator/runs/${encodeURIComponent(runId)}/resume`, 'POST', {}, 'Autonomous operator resumed.').catch(() => {});
+  if (runId && confirm('Retomar esta rodada do operador a partir do plano editorial e das etapas já salvas?')) {
+    await mutate(`/api/operator/runs/${encodeURIComponent(runId)}/resume`, 'POST', {}, 'Operador autônomo retomado.').catch(() => {});
   }
 });
 
@@ -1756,7 +1778,7 @@ $('#generate-form').addEventListener('submit', async event => {
   event.preventDefault();
   const values = Object.fromEntries(new FormData(event.currentTarget));
   try {
-    await mutate('/generate', 'POST', { ...values, topic: values.topic.trim() || null }, 'Generation job started.');
+    await mutate('/generate', 'POST', { ...values, topic: values.topic.trim() || null }, 'Geração iniciada.');
     $('#generate-dialog').close();
     event.currentTarget.reset();
   } catch (_error) { /* toast already shown */ }
@@ -1766,7 +1788,7 @@ $('#idea-form').addEventListener('submit', async event => {
   event.preventDefault();
   const values = Object.fromEntries(new FormData(event.currentTarget));
   try {
-    await mutate('/api/ideas', 'POST', values, 'Idea added to the backlog.');
+    await mutate('/api/ideas', 'POST', values, 'Ideia adicionada ao banco.');
     $('#idea-dialog').close();
     event.currentTarget.reset();
   } catch (_error) { /* toast already shown */ }
@@ -1777,7 +1799,7 @@ $('#profile-form').addEventListener('submit', async event => {
   const values = Object.fromEntries(new FormData(event.currentTarget));
   values.bannedTopics = values.bannedTopics.split(',').map(value => value.trim()).filter(Boolean);
   try {
-    await mutate('/api/profile', 'PUT', values, 'Channel setup saved.');
+    await mutate('/api/profile', 'PUT', values, 'Configuração do canal salva.');
     await mutate('/api/settings', 'PUT', {
       approval_required: $('#approval-required').checked,
       notification_enabled: $('#notifications-enabled').checked,
@@ -1786,12 +1808,12 @@ $('#profile-form').addEventListener('submit', async event => {
       video_generation_mode: values.videoGenerationMode,
       video_clip_duration: Number(values.videoClipDuration),
       video_max_generated_seconds: Number(values.videoMaxGeneratedSeconds)
-    }, 'Operator settings saved.');
+    }, 'Configurações do operador salvas.');
   } catch (_error) { /* toast already shown */ }
 });
 
 $('#api-key-button').addEventListener('click', () => {
-  if (requestApiKey() !== null) showToast('Dashboard API key saved in this browser.');
+  if (requestApiKey() !== null) showToast('Chave de API do painel salva neste navegador.');
 });
 
 const initialView = location.hash.slice(1);

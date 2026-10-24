@@ -347,7 +347,7 @@ class ChannelLearningEngine {
   buildOutcomeSummary(snapshots = [], strategy = null) {
     const goal = this.outcomeGoal(strategy);
     if (!goal) {
-      return { configured: false, available: false, goal: null, evidencePolicy: 'Configure a channel strategy to activate outcome tracking.' };
+      return { configured: false, available: false, goal: null, evidencePolicy: 'Configure uma estratégia do canal para ativar o acompanhamento de metas.' };
     }
     const cutoff = Date.now() - goal.windowDays * 86400000;
     const recent = snapshots.filter(snapshot => {

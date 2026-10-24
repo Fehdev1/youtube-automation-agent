@@ -70,13 +70,13 @@ class ProductionReadinessService {
     const checks = [];
 
     try {
-      checks.push(await this.executeCheck('text_provider', 'AI text provider', true, () => this.probeText()));
-      checks.push(await this.executeCheck('image_provider', 'Image provider', false, () => this.probeImage(tempDir, Boolean(options.includePaidMedia))));
-      checks.push(await this.executeCheck('video_provider', 'AI video provider', true, () => this.probeVideoProvider(tempDir, Boolean(options.includePaidVideo))));
-      checks.push(await this.executeCheck('voice_narration', 'Voice narration', true, () => this.probeNarration(tempDir)));
-      checks.push(await this.executeCheck('video_assembly', 'Audio/video assembly', true, () => this.probeVideoAssembly(tempDir)));
-      checks.push(await this.executeCheck('youtube_access', 'YouTube channel access', true, () => this.probeYouTube()));
-      checks.push(await this.executeCheck('upload_metadata', 'Upload metadata', true, () => this.probeMetadata()));
+      checks.push(await this.executeCheck('text_provider', 'Provedor de texto (IA)', true, () => this.probeText()));
+      checks.push(await this.executeCheck('image_provider', 'Provedor de imagem', false, () => this.probeImage(tempDir, Boolean(options.includePaidMedia))));
+      checks.push(await this.executeCheck('video_provider', 'Provedor de vídeo (IA)', true, () => this.probeVideoProvider(tempDir, Boolean(options.includePaidVideo))));
+      checks.push(await this.executeCheck('voice_narration', 'Narração por voz', true, () => this.probeNarration(tempDir)));
+      checks.push(await this.executeCheck('video_assembly', 'Montagem de áudio e vídeo', true, () => this.probeVideoAssembly(tempDir)));
+      checks.push(await this.executeCheck('youtube_access', 'Acesso ao canal do YouTube', true, () => this.probeYouTube()));
+      checks.push(await this.executeCheck('upload_metadata', 'Metadados do envio', true, () => this.probeMetadata()));
 
       const blockingFailures = checks.filter(check => check.blocking && check.status === 'failed');
       const warnings = checks.filter(check =>
