@@ -1363,6 +1363,17 @@ class Database {
     await this.executeQuery('UPDATE editor_projects SET export_path = ? WHERE production_id = ?', [exportPath, productionId]);
   }
 
+  async listEditorProductions() {
+    return this.getAllRows(
+      `SELECT p.id, p.created_at, p.assets, ps.seo, ps.script,
+              CASE WHEN ep.production_id IS NULL THEN 0 ELSE 1 END AS has_project
+       FROM productions p
+       LEFT JOIN production_snapshots ps ON ps.production_id = p.id
+       LEFT JOIN editor_projects ep ON ep.production_id = p.id
+       ORDER BY p.created_at DESC`
+    );
+  }
+
   async listEditorRenderStates() {
     const rows = await this.getAllRows('SELECT production_id, render_state FROM editor_projects WHERE render_state IS NOT NULL');
     return rows.map(row => ({ productionId: row.production_id, renderState: JSON.parse(row.render_state) }));

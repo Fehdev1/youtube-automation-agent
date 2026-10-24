@@ -80,7 +80,8 @@ class SystemTest {
       { name: 'Editor Media Library', test: () => this.testEditorLibrary() },
       { name: 'Editor Renderer Arguments', test: () => this.testEditorRenderer() },
       { name: 'Editor Real Render', test: () => this.testEditorRenderReal() },
-      { name: 'Editor CapCut Export', test: () => this.testEditorExport() }
+      { name: 'Editor CapCut Export', test: () => this.testEditorExport() },
+      { name: 'Editor Service', test: () => this.testEditorService() }
     ];
 
     let passed = 0;
@@ -4071,6 +4072,10 @@ class SystemTest {
       if (reread.renderState?.status !== 'running' || reread.exportPath !== 'C:\\export\\x' || reread.version !== 2) {
         throw new Error('Render state and export path were not stored without touching the version');
       }
+      const productions = await db.listEditorProductions();
+      if (!Array.isArray(productions) || productions.some(row => !('has_project' in row) || !('seo' in row))) {
+        throw new Error('listEditorProductions must return id, seo and has_project for each production');
+      }
       const states = await db.listEditorRenderStates();
       if (!states.some(item => item.productionId === id && item.renderState.status === 'running')) {
         throw new Error('listEditorRenderStates did not return the stored state');
@@ -4281,6 +4286,114 @@ class SystemTest {
       if ((await fs.readdir(path.join(folder, 'imagens'))).length !== 1) throw new Error('Exporting again must replace the folder');
     } finally {
       await fs.rm(dir, { recursive: true, force: true });
+    }
+  }
+
+  async testEditorService() {
+    const fs = require('fs').promises;
+    const os = require('os');
+    const { EditorService } = require('./utils/editor-service');
+    const dataDir = await fs.mkdtemp(path.join(os.tmpdir(), 'yaa-editor-svc-'));
+    const assert = (condition, message) => { if (!condition) throw new Error(message); };
+    const status = promise => promise.then(() => 200, error => error.status);
+
+    // In-memory stand-in for the Database methods the service uses.
+    const rows = new Map();
+    const bundles = new Map();
+    const db = {
+      async getProductionBundle(id) { return bundles.get(id) || null; },
+      async listEditorProductions() {
+        return [...bundles.values()].map(b => ({ id: b.id, created_at: '2026-10-24', assets: b.assets, seo: b.seo, script: null, has_project: rows.has(b.id) ? 1 : 0 }));
+      },
+      async getEditorProject(id) { return rows.get(id) || null; },
+      async saveEditorProject(id, project, expected) {
+        const row = rows.get(id);
+        if ((expected ?? null) !== (row ? row.version : null)) throw Object.assign(new Error('conflito'), { status: 409 });
+        const version = row ? row.version + 1 : 1;
+        rows.set(id, { ...row, productionId: id, version, project });
+        return { version };
+      },
+      async saveEditorRenderState(id, renderState) { rows.set(id, { ...rows.get(id), renderState }); },
+      async saveEditorExportPath(id, exportPath) { rows.set(id, { ...rows.get(id), exportPath }); },
+      async listEditorRenderStates() { return [...rows.entries()].filter(([, r]) => r.renderState).map(([productionId, r]) => ({ productionId, renderState: r.renderState })); }
+    };
+    const addProduction = async (id, { narration = true, images = 3 } = {}) => {
+      const folder = path.join(dataDir, 'assets', id);
+      await fs.mkdir(folder, { recursive: true });
+      for (let i = 1; i <= images; i++) await fs.writeFile(path.join(folder, `0${i}_img.jpg`), 'x');
+      const audio = path.join(dataDir, `${id}.mp3`);
+      if (narration) await fs.writeFile(audio, 'x');
+      bundles.set(id, { id, assets: { audio: { path: audio } }, seo: { title: `Vídeo ${id}`, description: '', tags: [] } });
+    };
+
+    let finishRender;
+    const renders = [];
+    const service = new EditorService(db, {
+      dataDir,
+      exportRoot: path.join(dataDir, 'export'),
+      videosDir: path.join(dataDir, 'videos'),
+      tempRoot: path.join(dataDir, 'tmp'),
+      logger: { info() {}, warn() {}, error() {} },
+      getDuration: async () => 30,
+      render: options => new Promise((resolve, reject) => {
+        renders.push(options);
+        options.onProgress({ stage: 'segments', current: 1, total: 3, percent: 10 });
+        finishRender = { resolve: () => resolve(options.outPath), reject };
+      })
+    });
+    try {
+      await addProduction('p1');
+      const list = await service.listProductions();
+      assert(list.length === 1 && list[0].title === 'Vídeo p1' && list[0].hasNarration === true && list[0].hasProject === false, `list was ${JSON.stringify(list)}`);
+
+      const editor = await service.getEditor('p1');
+      assert(editor.version === 1 && editor.project.blocks.length === 3 && editor.canRender && editor.blockedReason === null, 'the first open must create a 3-block project');
+      assert(editor.library.some(a => a.id === 'narration') && editor.render.status === 'idle', 'library and idle render state expected');
+      assert(await status(service.getEditor('missing')) === 404, 'unknown production must be 404');
+
+      const moved = JSON.parse(JSON.stringify(editor.project));
+      moved.blocks.reverse();
+      const saved = await service.saveProject('p1', { version: 1, project: moved });
+      assert(saved.version === 2 && saved.project.blocks[0].transition === 'cut', 'save must normalize and bump the version');
+      assert(await status(service.saveProject('p1', { version: 1, project: moved })) === 409, 'a stale save must be 409');
+
+      await fs.rm(path.join(dataDir, 'assets', 'p1', '02_img.jpg'));
+      const broken = await service.getEditor('p1');
+      assert(broken.issues.length === 1 && !broken.canRender && /faltando/.test(broken.blockedReason), `missing file must block: ${JSON.stringify(broken.issues)}`);
+      await fs.writeFile(path.join(dataDir, 'assets', 'p1', '02_img.jpg'), 'x');
+
+      await addProduction('silent', { narration: false });
+      const silent = await service.getEditor('silent');
+      assert(!silent.canRender && /narração/.test(silent.blockedReason), 'without narration rendering must be blocked');
+      assert(await status(service.startRender('silent')) === 400, 'rendering without narration must be 400');
+
+      const started = await service.startRender('p1');
+      assert(started.status === 'running', 'render must start');
+      assert(await status(service.startRender('p1')) === 409, 'a second render while one runs must be 409');
+      const running = await service.getRenderState('p1');
+      assert(running.message === 'Montando bloco 1 de 3' && running.percent === 10, `progress was ${JSON.stringify(running)}`);
+      assert(/p1_editor_\d{8}-\d{6}\.mp4$/.test(renders[0].outPath), `output name was ${renders[0].outPath}`);
+      finishRender.resolve();
+      await service.running;
+      const done = await service.getRenderState('p1');
+      assert(done.status === 'completed' && done.outputPath === renders[0].outPath, 'render must complete');
+
+      await service.startRender('p1');
+      finishRender.reject(Object.assign(new Error('ffmpeg exited'), { stderr: 'frame=1\n[image2] Error opening input file 05.jpg\nConversion failed!' }));
+      await service.running;
+      const failed = await service.getRenderState('p1');
+      assert(failed.status === 'failed' && failed.error.includes('Error opening input file'), `failure was ${JSON.stringify(failed)}`);
+
+      await db.saveEditorRenderState('p1', { status: 'running', percent: 50 });
+      await service.markInterruptedRenders();
+      const restarted = new EditorService(db, { dataDir, logger: { info() {}, warn() {}, error() {} } });
+      assert((await restarted.getRenderState('p1')).status === 'interrupted', 'a running render must become interrupted after a restart');
+
+      const exported = await service.exportProject('p1');
+      assert(exported.path.endsWith('video-p1'), `export path was ${exported.path}`);
+      assert((await service.outputFolder('p1', 'export')) === exported.path, 'the export folder must be remembered');
+    } finally {
+      await fs.rm(dataDir, { recursive: true, force: true });
     }
   }
 
